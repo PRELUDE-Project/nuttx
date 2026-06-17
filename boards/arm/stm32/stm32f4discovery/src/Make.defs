@@ -38,6 +38,11 @@ ifeq ($(CONFIG_ARCH_BUTTONS),y)
 CSRCS +=  stm32_buttons.c
 endif
 
+ifeq ($(CONFIG_LIS3DSH),y)
+CSRCS += stm32_lis3dsh.c
+VPATH += :$(TOPDIR)$(DELIM)boards$(DELIM)arm$(DELIM)stm32$(DELIM)common$(DELIM)src
+endif
+
 ifeq ($(CONFIG_STM32_CAN_CHARDRIVER),y)
 CSRCS += stm32_can.c
 endif

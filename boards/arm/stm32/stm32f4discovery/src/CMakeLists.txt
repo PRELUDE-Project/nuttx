@@ -36,6 +36,10 @@ if(CONFIG_ARCH_BUTTONS)
   list(APPEND SRCS stm32_buttons.c)
 endif()
 
+if(CONFIG_LIS3DSH)
+  list(APPEND SRCS ${NUTTX_DIR}/boards/arm/stm32/common/src/stm32_lis3dsh.c)
+endif()
+
 if(CONFIG_STM32_CAN_CHARDRIVER)
   list(APPEND SRCS stm32_can.c)
 endif()

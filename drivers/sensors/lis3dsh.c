@@ -469,6 +469,12 @@ static ssize_t lis3dsh_read(FAR struct file *filep, FAR char *buffer,
       return -ENOSYS;
     }
 
+  /* Keep polled reads useful even if the data-ready interrupt is not
+   * connected or is not firing on the board.
+   */
+
+  lis3dsh_read_measurement_data(priv);
+
   /* Acquire the mutex before the data is copied */
 
   ret = nxmutex_lock(&priv->datalock);

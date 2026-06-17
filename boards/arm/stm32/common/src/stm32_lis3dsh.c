@@ -98,7 +98,7 @@ int board_lis3dsh_initialize(int devno, int busno)
   sninfo("Initializing LIS3DSH\n");
 
   acc0_config.irq = 22;
-  acc0_config.spi_devid = 0;
+  acc0_config.spi_devid = SPIDEV_ACCELEROMETER(0);
   acc0_config.attach = &attach_disc_lis3dsh;
 
   spi = stm32_spibus_initialize(1);
