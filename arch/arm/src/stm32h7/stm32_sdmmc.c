@@ -81,7 +81,7 @@
  * Therefore even when IDMA is not used, the IDMA still has to be used to
  * service the FIFO to receive less than FIFO_SIZE_IN_BYTES / 2 to a local
  * buffer. When the FIFO Half Full and Full interrupt do fire the FIFO will
- * be monitored off the an HP work thread for a residual of less than
+ * be monitored by a watchdog interrupt for a residual of less than
  * FIFO_SIZE_IN_BYTES / 2.
  *
  * HW Issues when using IDMA
@@ -382,7 +382,7 @@ struct stm32_dev_s
   uint32_t           blocksize;       /* Current block size */
   uint32_t           receivecnt;      /* Real count to receive */
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
-  struct work_s      cbfifo;          /* Monitor for Lame FIFO */
+  struct wdog_s      fifowdog;        /* Monitor for Lame FIFO */
 #endif
   uint8_t            rxfifo[FIFO_SIZE_IN_BYTES] /* To offload with IDMA and support un-alinged buffers */
                      aligned_data(ARMV7M_DCACHE_LINESIZE);
@@ -1270,6 +1270,7 @@ static void stm32_sendfifo(struct stm32_dev_s *priv)
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
 static void stm32_recvfifo(struct stm32_dev_s *priv)
 {
+  irqstate_t flags;
   union
   {
     uint32_t w;
@@ -1280,10 +1281,22 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
    * data available in the RX FIFO.
    */
 
-  while (priv->remaining > 0 &&
-         (sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
-          STM32_SDMMC_STA_RXFIFOE) == 0)
+  for (; ; )
     {
+      /* The timer and SDMMC interrupts may preempt one another.  Protect
+       * the check and one complete word update, without masking interrupts
+       * for the duration of an arbitrarily large receive request.
+       */
+
+      flags = enter_critical_section();
+      if (priv->remaining == 0 ||
+          (sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
+           STM32_SDMMC_STA_RXFIFOE) != 0)
+        {
+          leave_critical_section(flags);
+          break;
+        }
+
       /* Read the next word from the RX FIFO */
 
       data.w = sdmmc_getreg32(priv, STM32_SDMMC_FIFO_OFFSET);
@@ -1310,6 +1323,8 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
 
           priv->remaining = 0;
         }
+
+      leave_critical_section(flags);
     }
 }
 #endif
@@ -1493,9 +1508,15 @@ static void stm32_endwait(struct stm32_dev_s *priv,
 static void stm32_endtransfer(struct stm32_dev_s *priv,
                               sdio_eventset_t wkupevent)
 {
+  irqstate_t flags = enter_critical_section();
+
   /* Disable all transfer related interrupts */
 
   stm32_configxfrints(priv, 0);
+
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+#endif
 
   /* If there were errors, send a stop command to DPSM */
 
@@ -1522,6 +1543,11 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
 
   priv->remaining = 0;
 
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  priv->receivecnt = 0;
+  priv->buffer = NULL;
+#endif
+
   /* Is a thread wait for these data transfer complete events? */
 
   if ((priv->waitevents & wkupevent) != 0)
@@ -1530,6 +1556,8 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
 
       stm32_endwait(priv, wkupevent);
     }
+
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -1548,27 +1576,42 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
  ****************************************************************************/
 
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
-static void stm32_sdmmc_fifo_monitor(void *arg)
+static void stm32_sdmmc_fifo_monitor(wdparm_t arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+  irqstate_t flags;
 
-  if (priv->receivecnt && priv->remaining &&
-      priv->remaining < FIFO_SIZE_IN_BYTES / 2)
+  /* Run in timer interrupt context, serialized with the SDMMC interrupt
+   * and transfer setup/termination.  A deferred work item could retain the
+   * caller's buffer after cancel returns, or resume in a later transfer.
+   */
+
+  flags = enter_critical_section();
+
+  if (priv->receivecnt && priv->remaining && priv->buffer != NULL &&
+      priv->xfrmask != 0)
     {
-      /* Manually Receive data from the lame RX FIFO */
+      if (priv->remaining < FIFO_SIZE_IN_BYTES / 2)
+        {
+          /* Less than 32 bytes: at most eight FIFO reads, including the
+           * final fractional word, even if RXFIFOE never becomes set.
+           */
 
-      stm32_recvfifo(priv);
+          stm32_recvfifo(priv);
+        }
+
+      /* Only an unfinished receive may rearm the FIFO monitor. */
+
+      if (priv->remaining &&
+          sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 &&
+          sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) ==
+          STM32_SDMMC_STA_DPSMACT)
+        {
+          wd_start(&priv->fifowdog, 1, stm32_sdmmc_fifo_monitor, arg);
+        }
     }
 
-  /* Check for the lame FIFO condition */
-
-  if (sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 &&
-      sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) ==
-      STM32_SDMMC_STA_DPSMACT)
-    {
-      work_queue(HPWORK, &priv->cbfifo,
-                 stm32_sdmmc_fifo_monitor, arg, 1);
-    }
+  leave_critical_section(flags);
 }
 #endif
 
@@ -1622,6 +1665,9 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
   uint32_t enabled;
   uint32_t pending;
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  irqstate_t flags;
+#endif
 #if defined(HAVE_SDMMC_SDIO_MODE)
   uint32_t mask;
 #endif
@@ -1653,8 +1699,15 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
               /* Receive data from the RX FIFO */
 
               stm32_recvfifo(priv);
-              work_queue(HPWORK, &priv->cbfifo,
-                         stm32_sdmmc_fifo_monitor, arg, 1);
+              flags = enter_critical_section();
+              if (priv->receivecnt && priv->remaining &&
+                  !WDOG_ISACTIVE(&priv->fifowdog))
+                {
+                  wd_start(&priv->fifowdog, 1, stm32_sdmmc_fifo_monitor,
+                           (wdparm_t)priv);
+                }
+
+              leave_critical_section(flags);
             }
 
           /* Otherwise, Is the transmit FIFO half empty or less?  If so
@@ -1691,6 +1744,8 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
 #ifndef CONFIG_STM32H7_SDMMC_IDMA
 
+              flags = enter_critical_section();
+
               /* If the transfer would not trigger fifo half full
                * we used IDMA to manage the lame fifo
                */
@@ -1700,6 +1755,9 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
                 {
                   memcpy(priv->buffer, priv->rxfifo, priv->remaining);
                 }
+
+              stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
+              leave_critical_section(flags);
 #else
               if (priv->receivecnt)
                 {
@@ -1710,7 +1768,6 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
                   stm32_recvdma(priv);
                 }
               else
-#endif
                 {
                   /* Then terminate the transfer.
                    * Sets STM32_SDMMC_ICR_DATAENDC
@@ -1718,6 +1775,7 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
                   stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
                 }
+#endif
             }
 
           /* Handle data block send/receive CRC failure */
@@ -1908,6 +1966,11 @@ static void stm32_reset(struct sdio_dev_s *dev)
   /* Disable clocking */
 
   flags = enter_critical_section();
+
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+  priv->receivecnt = 0;
+#endif
 
 #if defined(CONFIG_STM32H7_SDMMC1)
   if (priv->base == STM32_SDMMC1_BASE)
@@ -2310,9 +2373,13 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
                            size_t nbytes)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+
+  flags = enter_critical_section();
+  wd_cancel(&priv->fifowdog);
 
   /* Reset the DPSM configuration */
 
@@ -2358,6 +2425,7 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
   stm32_configxfrints(priv, STM32_SDMMC_RECV_MASK);
   stm32_sample(priv, SAMPLENDX_AFTER_SETUP);
 
+  leave_critical_section(flags);
   return OK;
 }
 #endif
@@ -2386,9 +2454,13 @@ static int stm32_sendsetup(struct sdio_dev_s *dev, const
                            uint8_t *buffer, size_t nbytes)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+
+  flags = enter_critical_section();
+  wd_cancel(&priv->fifowdog);
 
   /* Reset the DPSM configuration */
 
@@ -2413,6 +2485,7 @@ static int stm32_sendsetup(struct sdio_dev_s *dev, const
 
   stm32_configxfrints(priv, STM32_SDMMC_SEND_MASK);
   stm32_sample(priv, SAMPLENDX_AFTER_SETUP);
+  leave_critical_section(flags);
   return OK;
 }
 #endif
@@ -2437,6 +2510,9 @@ static int stm32_sendsetup(struct sdio_dev_s *dev, const
 static int stm32_cancel(struct sdio_dev_s *dev)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags;
+
+  flags = enter_critical_section();
 
   /* Disable all transfer- and event- related interrupts */
 
@@ -2462,9 +2538,16 @@ static int stm32_cancel(struct sdio_dev_s *dev)
 
   wd_cancel(&priv->waitwdog);
 
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+  priv->receivecnt = 0;
+  priv->buffer = NULL;
+#endif
+
   /* Mark no transfer in progress */
 
   priv->remaining = 0;
+  leave_critical_section(flags);
   return OK;
 }
 
