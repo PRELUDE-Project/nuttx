@@ -1689,98 +1689,13 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
       pending  = enabled & priv->xfrmask;
       if (pending != 0)
         {
-#ifndef CONFIG_STM32H7_SDMMC_IDMA
-          /* Is the RX FIFO half full or more?  Is so then we must be
-           * processing a receive transaction.
+          /* Errors take precedence over FIFO service and DATAEND.  Do not
+           * copy invalid receive data or report a successful transfer.
            */
-
-          if ((pending & STM32_SDMMC_STA_RXFIFOHF) != 0)
-            {
-              /* Receive data from the RX FIFO */
-
-              stm32_recvfifo(priv);
-              flags = enter_critical_section();
-              if (priv->receivecnt && priv->remaining &&
-                  !WDOG_ISACTIVE(&priv->fifowdog))
-                {
-                  wd_start(&priv->fifowdog, 1, stm32_sdmmc_fifo_monitor,
-                           (wdparm_t)priv);
-                }
-
-              leave_critical_section(flags);
-            }
-
-          /* Otherwise, Is the transmit FIFO half empty or less?  If so
-           * we must be processing a send transaction.  NOTE:  We can't
-           * be processing both!
-           */
-
-          else if ((pending & STM32_SDMMC_STA_TXFIFOHE) != 0)
-            {
-              /* Send data via the TX FIFO */
-
-              stm32_sendfifo(priv);
-
-              /* If we are done shutdown the TXFIFOHE interrupt */
-
-              if (priv->remaining == 0)
-                {
-                  sdmmc_putreg32(priv, ~STM32_SDMMC_MASK_TXFIFOHEIE &
-                                 sdmmc_getreg32(priv,
-                                                STM32_SDMMC_MASK_OFFSET),
-                                 STM32_SDMMC_MASK_OFFSET);
-                }
-            }
-#endif
-
-          /* Handle data end events */
-
-          if ((pending & STM32_SDMMC_STA_DATAEND) != 0)
-            {
-              /* Handle any data remaining the RX FIFO.  If the RX FIFO is
-               * less than half full at the end of the transfer, then no
-               * half-full interrupt will be received.
-               */
-
-#ifndef CONFIG_STM32H7_SDMMC_IDMA
-
-              flags = enter_critical_section();
-
-              /* If the transfer would not trigger fifo half full
-               * we used IDMA to manage the lame fifo
-               */
-
-              if (priv->remaining && priv->remaining <
-                  FIFO_SIZE_IN_BYTES / 2)
-                {
-                  memcpy(priv->buffer, priv->rxfifo, priv->remaining);
-                }
-
-              stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
-              leave_critical_section(flags);
-#else
-              if (priv->receivecnt)
-                {
-                  /* Invalidate dcache, and copy the received data into
-                   * client buffers in unaligned case
-                   */
-
-                  stm32_recvdma(priv);
-                }
-              else
-                {
-                  /* Then terminate the transfer.
-                   * Sets STM32_SDMMC_ICR_DATAENDC
-                   */
-
-                  stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
-                }
-#endif
-            }
 
           /* Handle data block send/receive CRC failure */
 
-          else if ((pending & STM32_SDMMC_STA_DCRCFAIL) != 0)
+          if ((pending & STM32_SDMMC_STA_DCRCFAIL) != 0)
             {
               /* Terminate the transfer with an error.
                *  Sets STM32_SDMMC_ICR_DCRCFAILC
@@ -1836,6 +1751,97 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
               stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE |
                                       SDIOWAIT_ERROR);
+            }
+          else
+            {
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+              /* Is the RX FIFO half full or more?  Is so then we must be
+               * processing a receive transaction.
+               */
+
+              if ((pending & STM32_SDMMC_STA_RXFIFOHF) != 0)
+                {
+                  /* Receive data from the RX FIFO */
+
+                  stm32_recvfifo(priv);
+                  flags = enter_critical_section();
+                  if (priv->receivecnt && priv->remaining &&
+                      !WDOG_ISACTIVE(&priv->fifowdog))
+                    {
+                      wd_start(&priv->fifowdog, 1, stm32_sdmmc_fifo_monitor,
+                               (wdparm_t)priv);
+                    }
+
+                  leave_critical_section(flags);
+                }
+
+              /* Otherwise, Is the transmit FIFO half empty or less?  If so
+               * we must be processing a send transaction.  NOTE:  We can't
+               * be processing both!
+               */
+
+              else if ((pending & STM32_SDMMC_STA_TXFIFOHE) != 0)
+                {
+                  /* Send data via the TX FIFO */
+
+                  stm32_sendfifo(priv);
+
+                  /* If we are done shutdown the TXFIFOHE interrupt */
+
+                  if (priv->remaining == 0)
+                    {
+                      sdmmc_putreg32(priv, ~STM32_SDMMC_MASK_TXFIFOHEIE &
+                                     sdmmc_getreg32(priv,
+                                                    STM32_SDMMC_MASK_OFFSET),
+                                     STM32_SDMMC_MASK_OFFSET);
+                    }
+                }
+#endif
+
+              /* Handle data end events */
+
+              if ((pending & STM32_SDMMC_STA_DATAEND) != 0)
+                {
+                  /* Handle any data remaining the RX FIFO.  If the RX FIFO is
+                   * less than half full at the end of the transfer, then no
+                   * half-full interrupt will be received.
+                   */
+
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+
+                  flags = enter_critical_section();
+
+                  /* If the transfer would not trigger fifo half full
+                   * we used IDMA to manage the lame fifo
+                   */
+
+                  if (priv->remaining && priv->remaining <
+                      FIFO_SIZE_IN_BYTES / 2)
+                    {
+                      memcpy(priv->buffer, priv->rxfifo, priv->remaining);
+                    }
+
+                  stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
+                  leave_critical_section(flags);
+#else
+                  if (priv->receivecnt)
+                    {
+                      /* Invalidate dcache, and copy the received data into
+                       * client buffers in unaligned case
+                       */
+
+                      stm32_recvdma(priv);
+                    }
+                  else
+                    {
+                      /* Then terminate the transfer.
+                       * Sets STM32_SDMMC_ICR_DATAENDC
+                       */
+
+                      stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
+                    }
+#endif
+                }
             }
         }
 
