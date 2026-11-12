@@ -2038,7 +2038,13 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_part_s *part,
     {
       /* Send CMD24, WRITE_BLOCK, and verify good R1 status is returned */
 
-      mmcsd_sendcmdpoll(priv, MMCSD_CMD24, offset);
+      ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD24, offset);
+      if (ret < 0)
+        {
+          /* No transfer buffer or data wait has been armed on this path. */
+          return ret;
+        }
+
       ret = mmcsd_recv_r1(priv, MMCSD_CMD24);
       if (ret != OK)
         {
