@@ -1083,6 +1083,54 @@ out:
 
 
 
+
+/* Reject output aliases into either controller before copying observations. */
+static bool scr_snapshot_overlap(uintptr_t out, uintptr_t base)
+{
+  return out <= base + sizeof(struct stm32_dev_s) - 1 &&
+         base <= out + sizeof(struct scr_hw_snapshot) - 1;
+}
+int stm32_scr_snapshot(struct sdio_dev_s *dev, struct scr_lease_key key,
+                       struct scr_hw_snapshot *out)
+{
+  struct stm32_dev_s *priv = NULL;
+  struct scr_hw_snapshot value = {0};
+  uintptr_t dest = (uintptr_t)out;
+  irqstate_t flags;
+  int ret = -ESTALE;
+  if (out == NULL || dest % _Alignof(struct scr_hw_snapshot) != 0 ||
+      dest > UINTPTR_MAX - sizeof(*out) + 1)
+    return -EINVAL;
+  if (up_interrupt_context()) return -EPERM;
+#ifdef CONFIG_STM32H7_SDMMC1
+  if (dev == &g_sdmmcdev1.dev) priv = &g_sdmmcdev1;
+  if (scr_snapshot_overlap(dest, (uintptr_t)&g_sdmmcdev1)) return -EINVAL;
+#endif
+#ifdef CONFIG_STM32H7_SDMMC2
+  if (dev == &g_sdmmcdev2.dev) priv = &g_sdmmcdev2;
+  if (scr_snapshot_overlap(dest, (uintptr_t)&g_sdmmcdev2)) return -EINVAL;
+#endif
+  if (priv == NULL) return -ENODEV;
+  flags = enter_critical_section();
+  if (scr_lease_matches(&priv->scrlease, key) &&
+      key.owner == (uintptr_t)nxsched_gettid() && !priv->scrinitializing)
+    {
+      value.version = 1;
+      value.state = priv->scrlease.state;
+      value.generation = priv->scrlease.generation;
+      value.sta_before = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+      value.mask = sdmmc_getreg32(priv, STM32_SDMMC_MASK_OFFSET);
+      value.idmactrl = sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
+      value.dlen = sdmmc_getreg32(priv, STM32_SDMMC_DLEN_OFFSET);
+      value.dctrl = sdmmc_getreg32(priv, STM32_SDMMC_DCTRL_OFFSET);
+      value.sta_after = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+      ret = OK;
+    }
+  leave_critical_section(flags);
+  if (ret == OK) *out = value;
+  return ret;
+}
+
 int stm32_scr_stop_status(struct sdio_dev_s *dev, struct scr_lease_key key)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;

@@ -624,7 +624,32 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
   ret = stm32_scr_claim(priv->dev, &arena, &key);
   if (ret != OK) return ret;
   ret = mmcsd_get_scr_data(priv, (uint32_t *)arena);
+#ifdef CONFIG_DEBUG_FS_ERROR
+  /* Trusted stack storage; capture before finish revokes the lease. */
+  struct scr_hw_snapshot observation;
+  int observed = stm32_scr_snapshot(priv->dev, key, &observation);
+#endif
   ret = stm32_scr_finish(priv->dev, key, ret, scr);
+#ifdef CONFIG_DEBUG_FS_ERROR
+  if (observed == OK)
+    {
+      ferr("SCR pre-finish observation v%lu gen=%" PRIu64 ": state=%lu "
+           "STA=%08lx/%08lx MASK=%08lx "
+           "IDMA=%08lx DLEN=%lu DCTRL=%08lx; not stop proof\n",
+           (unsigned long)observation.version, observation.generation,
+           (unsigned long)observation.state,
+           (unsigned long)observation.sta_before,
+           (unsigned long)observation.sta_after,
+           (unsigned long)observation.mask,
+           (unsigned long)observation.idmactrl,
+           (unsigned long)observation.dlen,
+           (unsigned long)observation.dctrl);
+    }
+  else
+    {
+      ferr("SCR observation unavailable: %d\n", observed);
+    }
+#endif
   ferr("SCR review: result=%d, stop_status=%d (diagnostic only)\n",
        ret, stm32_scr_stop_status(priv->dev, key));
   return ret;

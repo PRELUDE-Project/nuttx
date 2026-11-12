@@ -98,4 +98,14 @@ struct sdio_dev_s;
 int stm32_scr_claim(struct sdio_dev_s *, uint8_t **, struct scr_lease_key *);
 int stm32_scr_finish(struct sdio_dev_s *, struct scr_lease_key, int, uint32_t[2]);
 int stm32_scr_stop_status(struct sdio_dev_s *, struct scr_lease_key);
+
+/* Trusted kernel caller only: out must be aligned writable normal RAM,
+ * never MMIO, controller storage or concurrently accessed memory.
+ * Observation only. No atomic peripheral snapshot or stop/reuse authority. */
+struct scr_hw_snapshot {
+  uint32_t version, state, sta_before, mask, idmactrl, dlen, dctrl, sta_after;
+  uint64_t generation;
+};
+int stm32_scr_snapshot(struct sdio_dev_s *, struct scr_lease_key,
+                       struct scr_hw_snapshot *);
 #endif
