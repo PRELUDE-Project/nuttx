@@ -1,5 +1,6 @@
 #ifndef SCR_LEASE_REVIEW_H
 #define SCR_LEASE_REVIEW_H
+#include <nuttx/config.h>
 /* REVIEW ONLY. Every call and observation requires the SAME caller-provided
  * lock, including ISR, timeout, setup, copy, reset and initialization paths.
  * This header neither acquires that lock nor proves its suitability for SMP.
@@ -15,12 +16,16 @@
 #include <stdalign.h>
 
 enum scr_lease_state { SCR_LEASE_IDLE, SCR_LEASE_ACTIVE,
-                       SCR_LEASE_QUARANTINED, SCR_LEASE_RETIRED };
+                       SCR_LEASE_QUARANTINED, SCR_LEASE_RETIRED, SCR_LEASE_HANDOFF };
 struct scr_lease_review;
 struct scr_lease_key { const struct scr_lease_review *instance;
                        uintptr_t owner; uint64_t generation; };
 struct scr_lease_review {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  alignas(32) uint8_t arena[512];
+#else
   alignas(32) uint8_t arena[32];
+#endif
   enum scr_lease_state state;
   uintptr_t owner;
   uint64_t generation;
@@ -102,6 +107,15 @@ int stm32_scr_stop_status(struct sdio_dev_s *, struct scr_lease_key);
 /* Trusted kernel caller only: out must be aligned writable normal RAM,
  * never MMIO, controller storage or concurrently accessed memory.
  * Observation only. No atomic peripheral snapshot or stop/reuse authority. */
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* Trusted SDHC/SDXC upper layer only. Capacity must come from validated
+ * card CSD/OCR, not untrusted input. Never permits writes or recovery. */
+int stm32_sector_claim(struct sdio_dev_s *, uint64_t lba, uint64_t capacity,
+                        bool block_addressed_sd, uint8_t **,
+                        struct scr_lease_key *);
+int stm32_sector_finish(struct sdio_dev_s *, struct scr_lease_key, int,
+                         uint8_t output[512]);
+#endif
 struct scr_hw_snapshot {
   uint32_t version, state, sta_before, mask, idmactrl, dlen, dctrl, sta_after;
   uint64_t generation;

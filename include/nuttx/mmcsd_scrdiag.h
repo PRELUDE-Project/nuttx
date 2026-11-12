@@ -13,6 +13,15 @@ extern "C" {
  * state, retries, or grants physical-stop/recovery authority. Not a raw ioctl.
  */
 int mmcsd_scr_diagnostic(struct sdio_dev_s *dev);
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* One attempt following successful SCR on the same exclusive controller.
+ * The card must remain physically unchanged. Trusted writable output is
+ * exactly 512 bytes and must not alias controller state. No retry/recovery;
+ * success retires the arena and errors preserve quarantine. Task context only.
+ */
+int mmcsd_sector_readonce(struct sdio_dev_s *, uint64_t lba,
+                           uint8_t *output, size_t output_size);
+#endif
 #ifdef __cplusplus
 }
 #endif

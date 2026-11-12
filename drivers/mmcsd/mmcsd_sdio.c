@@ -4714,9 +4714,14 @@ static FAR const char *mmc_get_mode_name(uint8_t mode)
 /* Trusted manual caller, no block device registration or media callbacks.
  * Persistent state is retained on every result. Never a recovery API.
  */
+static struct mmcsd_state_s g_scrdiag_state;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+static bool g_scrdiag_ready;
+static bool g_sector_attempted;
+#endif
 int mmcsd_scr_diagnostic(struct sdio_dev_s *dev)
 {
-  static struct mmcsd_state_s state;
+#define state g_scrdiag_state
   static bool started;
   irqstate_t flags = enter_critical_section();
   if (started || dev == NULL)
@@ -4734,8 +4739,66 @@ int mmcsd_scr_diagnostic(struct sdio_dev_s *dev)
   ret = mmcsd_cardidentify(&state);
   if (ret != OK) return ret;
   if (!IS_SD(state.type)) return -ENOTSUP;
-  return mmcsd_sdinitialize(&state);
+  ret = mmcsd_sdinitialize(&state);
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  flags = enter_critical_section();
+  g_scrdiag_ready = ret == OK;
+  leave_critical_section(flags);
+#endif
+  return ret;
+#undef state
 }
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* Internal validation from the immutable successful-identification record.
+ * Do not trust the generic32-bit geometry for the 2^32-block boundary.
+ */
+static int mmcsd_sector_validate(struct mmcsd_state_s *priv, uint64_t lba,
+                                 uint64_t *capacity)
+{
+  if (priv->type != (MMCSD_CARDTYPE_SDV2 | MMCSD_CARDTYPE_BLOCK) ||
+      (priv->csd[0] >> 30) != 1 || ((priv->csd[1] >> 16) & 15) != 9 ||
+      priv->blocksize != 512 || priv->blockshift != 9)
+    return -ENOTSUP;
+  uint32_t csize = ((priv->csd[1] & 0x3f) << 16) | (priv->csd[2] >> 16);
+  uint64_t blocks = ((uint64_t)csize + 1) << 10;
+  if (lba >= blocks || lba > UINT32_MAX) return -ERANGE;
+  *capacity = blocks;
+  return OK;
+}
+/* Trusted task-only API for the optional one-shot diagnostic CLI.
+ * One attempt after successful SCR identification, no writes, no retry.
+ */
+int mmcsd_sector_readonce(struct sdio_dev_s *dev, uint64_t lba,
+                           uint8_t *output, size_t output_size)
+{
+  struct mmcsd_state_s *priv = &g_scrdiag_state;
+  struct scr_lease_key key;
+  uint8_t *arena;
+  uint64_t capacity;
+  int ret;
+  if (!dev || !output || output_size != 512) return -EINVAL;
+  irqstate_t flags = enter_critical_section();
+  if (!g_scrdiag_ready || dev != priv->dev || g_sector_attempted)
+    { leave_critical_section(flags); return -EBUSY; }
+  ret = mmcsd_sector_validate(priv, lba, &capacity);
+  if (ret != OK) { leave_critical_section(flags); return ret; }
+  g_sector_attempted = true;
+  leave_critical_section(flags);
+  ret = stm32_sector_claim(dev, lba, capacity, true, &arena, &key);
+  if (ret != OK) return ret;
+  SDIO_BLOCKSETUP(dev, 512, 1);
+  SDIO_WAITENABLE(dev, SDIOWAIT_TRANSFERDONE | SDIOWAIT_TIMEOUT |
+                      SDIOWAIT_ERROR, MMCSD_BLOCK_RDATADELAY);
+  ret = SDIO_DMARECVSETUP(dev, arena, 512);
+  if (ret == OK) ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD17, (uint32_t)lba);
+  if (ret == OK) ret = mmcsd_recv_r1(priv, MMCSD_CMD17);
+  if (ret == OK) ret = mmcsd_eventwait(priv, SDIOWAIT_TIMEOUT | SDIOWAIT_ERROR);
+  /* The finish path seals failures before releasing caller ownership.
+   * No generic cancel/reset or retry, even when the transfer failed early.
+   */
+  return stm32_sector_finish(dev, key, ret, output);
+}
+#endif
 #endif
 
 int mmcsd_slotinitialize(int minor, FAR struct sdio_dev_s *dev)

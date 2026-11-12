@@ -1847,15 +1847,27 @@ config SD_SCR_CONTAINMENT_REVIEW
 		this implementation with the documented hardware prerequisites.
 
 config SD_RECEIVE_LEASE_ONLY_REVIEW
-	bool "SCR-only manual diagnostic (no sector reads)"
+	bool "Manual SCR diagnostic base"
 	default n
 	depends on SD_SCR_CONTAINMENT_REVIEW && STM32H7_SDMMC_IDMA
 	depends on MMCSD_READONLY && !MMCSD_MMCSUPPORT && !MMCSD_IOCSUPPORT
 	depends on !FS_FAT && NSH_DISABLE_MOUNT
 	---help---
 		Review-only one-shot manual SCR diagnostic. Generic receive setup is
-		rejected; no sector read/write testing or filesystem mount. Does not
+		rejected unless the separate single-sector option is enabled; no
+		write testing or filesystem mount. Does not
 		prove physical error recovery or authorize board programming.
+
+config SD_SECTOR_READ_REVIEW
+	bool "Experimental one-shot single-sector diagnostic"
+	default n
+	depends on SD_RECEIVE_LEASE_ONLY_REVIEW && STM32H7_SDMMC_IDMA
+	---help---
+		One CMD17 after a qualified SCR, using a shared 512-byte permanent
+		arena. Requires an exclusive, unchanged SDHC/SDXC card session and
+		strict media-notification contract; see tools/diagnostics/scrdiag.
+		Success retires the arena; errors quarantine it without recovery.
+		No hardware validation, writes, hotplug, retry or stop proof.
 
 config STM32H7_SDMMC_XFRDEBUG
 	bool "SDMMC transfer debug"
