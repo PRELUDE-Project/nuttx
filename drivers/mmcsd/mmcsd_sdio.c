@@ -3681,7 +3681,7 @@ static int mmcsd_iocmd(FAR struct mmcsd_part_s *part,
     {
     case MMCSD_CMDIDX0: /* Reset card to idle state */
       {
-        mmcsd_sendcmdpoll(priv, MMCSD_CMD0, ic_ptr->arg);
+        ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD0, ic_ptr->arg);
         MMCSD_USLEEP(MMCSD_IDLE_DELAY);
       }
       break;
