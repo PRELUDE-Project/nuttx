@@ -1709,7 +1709,13 @@ static ssize_t mmcsd_readsingle(FAR struct mmcsd_part_s *part,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      ret = SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
   /* Send CMD17, READ_SINGLE_BLOCK: Read a block of the size selected
@@ -1861,7 +1867,13 @@ static ssize_t mmcsd_readmultiple(FAR struct mmcsd_part_s *part,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, buffer, nbytes);
+      ret = SDIO_RECVSETUP(priv->dev, buffer, nbytes);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
 #ifdef CONFIG_MMCSD_MMCSUPPORT
@@ -3330,7 +3342,13 @@ static int mmcsd_read_extcsd(FAR struct mmcsd_state_s *priv,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, extcsd, 512);
+      ret = SDIO_RECVSETUP(priv->dev, extcsd, 512);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
   /* Send CMD8 in data-transfer mode to obtain the
@@ -3595,7 +3613,13 @@ static int mmcsd_general_cmd_read(FAR struct mmcsd_state_s *priv,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      ret = SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
   /* Send CMD56: Read a sector size data and verify that good R1
