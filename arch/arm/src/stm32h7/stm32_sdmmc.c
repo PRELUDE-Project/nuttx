@@ -428,7 +428,6 @@ struct stm32_sdioregs_s
   uint16_t dctrl;
   uint32_t dtimer;
   uint32_t dlen;
-  uint32_t dcount;
   uint32_t sta;
   uint32_t mask;
 };
@@ -1205,7 +1204,7 @@ static void stm32_sdiosample(struct stm32_dev_s *priv,
   regs->dctrl   = (uint16_t)sdmmc_getreg32(priv, STM32_SDMMC_DCTRL_OFFSET);
   regs->dtimer  = sdmmc_getreg32(priv, STM32_SDMMC_DTIMER_OFFSET);
   regs->dlen    = sdmmc_getreg32(priv, STM32_SDMMC_DLEN_OFFSET);
-  regs->dcount  = sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET);
+  /* DCNTR is only specified after completion/hold, not arbitrary samples. */
   regs->sta     = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
   regs->mask    = sdmmc_getreg32(priv, STM32_SDMMC_MASK_OFFSET);
 }
@@ -1249,8 +1248,7 @@ static void stm32_sdiodump(struct stm32_sdioregs_s *regs, const char *msg)
          regs->dtimer);
   mcinfo("   DLEN[%08x]: %08" PRIx32 "\n", STM32_SDMMC_DLEN_OFFSET,
          regs->dlen);
-  mcinfo(" DCOUNT[%08x]: %08" PRIx32 "\n", STM32_SDMMC_DCOUNT_OFFSET,
-         regs->dcount);
+  mcinfo(" DCOUNT: omitted (sample may be active or failed)\n");
   mcinfo("    STA[%08x]: %08" PRIx32 "\n", STM32_SDMMC_STA_OFFSET,
          regs->sta);
   mcinfo("   MASK[%08x]: %08" PRIx32 "\n", STM32_SDMMC_MASK_OFFSET,
