@@ -2240,7 +2240,11 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_part_s *part,
     {
       /* Send CMD55, APP_CMD, a verify that good R1 status is returned */
 
-      mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+      ret = mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+      if (ret != OK)
+        {
+          return ret;
+        }
       ret = mmcsd_recv_r1(priv, SD_CMD55);
       if (ret != OK)
         {
@@ -2252,7 +2256,11 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_part_s *part,
        * is returned.
        */
 
-      mmcsd_sendcmdpoll(priv, SD_ACMD23, nblocks);
+      ret = mmcsd_sendcmdpoll(priv, SD_ACMD23, nblocks);
+      if (ret != OK)
+        {
+          return ret;
+        }
       ret = mmcsd_recv_r1(priv, SD_ACMD23);
       if (ret != OK)
         {
@@ -2298,7 +2306,11 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_part_s *part,
        * is returned
        */
 
-      mmcsd_sendcmdpoll(priv, MMCSD_CMD25, offset);
+      ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD25, offset);
+      if (ret != OK)
+        {
+          return ret;
+        }
       ret = mmcsd_recv_r1(priv, MMCSD_CMD25);
       if (ret != OK)
         {
