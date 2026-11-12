@@ -1524,7 +1524,12 @@ static int mmcsd_stoptransmission(FAR struct mmcsd_state_s *priv)
 
   /* Send CMD12, STOP_TRANSMISSION, and verify good R1 return status  */
 
-  mmcsd_sendcmdpoll(priv, MMCSD_CMD12, 0);
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD12, 0);
+  if (ret != OK)
+    {
+      return ret;
+    }
+
   ret = mmcsd_recv_r1(priv, MMCSD_CMD12);
   if (ret != OK)
     {
@@ -1924,6 +1929,7 @@ static ssize_t mmcsd_readmultiple(FAR struct mmcsd_part_s *part,
       if (ret != OK)
         {
           ferr("ERROR: mmcsd_stoptransmission failed: %d\n", ret);
+          return ret;
         }
     }
 
