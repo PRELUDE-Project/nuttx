@@ -2153,14 +2153,18 @@ static void stm32_sdmmc_fifo_monitor(wdparm_t arg)
 static int stm32_sdmmc_rdyinterrupt(int irq, void *context, void *arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+  irqstate_t flags;
 
-  /* Avoid noise, check the state */
+  /* A retired ready interrupt must not complete a different kind of wait. */
 
-  if (stm32_gpioread(priv->d0_gpio))
+  flags = enter_critical_section();
+  if ((priv->waitevents & SDIOWAIT_WRCOMPLETE) != 0 &&
+      priv->wkupevent == 0 && stm32_gpioread(priv->d0_gpio))
     {
       stm32_endwait(priv, SDIOWAIT_WRCOMPLETE);
     }
 
+  leave_critical_section(flags);
   return OK;
 }
 #endif
