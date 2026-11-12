@@ -3755,7 +3755,22 @@ static void stm32_waitenable(struct sdio_dev_s *dev,
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
           scr_seal(priv, -ETIMEDOUT);
 #endif
-          priv->wkupevent = SDIOWAIT_TIMEOUT;
+          irqstate_t terminalflags = enter_critical_section();
+
+          /* A concurrent terminal event may already have posted the waiter. */
+
+          if (priv->wkupevent == 0 &&
+              (priv->waitevents & SDIOWAIT_TIMEOUT) != 0)
+            {
+              sdio_eventset_t terminal = SDIOWAIT_TIMEOUT;
+
+#ifdef CONFIG_MMCSD_SDIOWAIT_WRCOMPLETE
+              terminal |= priv->waitevents & SDIOWAIT_WRCOMPLETE;
+#endif
+              stm32_endwait(priv, terminal);
+            }
+
+          leave_critical_section(terminalflags);
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
 do { leave_critical_section(scrflags); return ; } while (0);
 #else
