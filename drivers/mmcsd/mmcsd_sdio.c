@@ -25,6 +25,9 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+#  include <nuttx/scr_lease_review.h>
+#endif
 
 #if defined (CONFIG_MMCSD) && defined (CONFIG_MMCSD_SDIO)
 
@@ -490,7 +493,11 @@ static int mmcsd_recv_r6(FAR struct mmcsd_state_s *priv, uint32_t cmd)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+static int mmcsd_get_scr_data(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
+#else
 static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
+#endif
 {
   int ret;
 #ifdef CONFIG_SDIO_DMA
@@ -553,7 +560,19 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 
   /* Send CMD55 APP_CMD with argument as card's RCA */
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+  if (ret != OK)
+    {
+      ferr("ERROR: Send/poll SD_CMD55 failed: %d\n", ret);
+      SDIO_CANCEL(priv->dev);
+      return ret;
+    }
+
+#else
   mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+#endif
+
   ret = mmcsd_recv_r1(priv, SD_CMD55);
   if (ret != OK)
     {
@@ -564,7 +583,19 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 
   /* Send ACMD51 SD_APP_SEND_SCR with argument as 0 to start data receipt */
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, SD_ACMD51, 0);
+  if (ret != OK)
+    {
+      ferr("ERROR: Send/poll SD_ACMD51 failed: %d\n", ret);
+      SDIO_CANCEL(priv->dev);
+      return ret;
+    }
+
+#else
   mmcsd_sendcmdpoll(priv, SD_ACMD51, 0);
+#endif
+
   ret = mmcsd_recv_r1(priv, SD_ACMD51);
   if (ret != OK)
     {
@@ -583,6 +614,23 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 
   return ret;
 }
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
+{
+  struct scr_lease_key key;
+  uint8_t *arena;
+  int ret;
+  /* Caller pointer is used only by task-side qualified final copy. */
+  ret = stm32_scr_claim(priv->dev, &arena, &key);
+  if (ret != OK) return ret;
+  ret = mmcsd_get_scr_data(priv, (uint32_t *)arena);
+  ret = stm32_scr_finish(priv->dev, key, ret, scr);
+  ferr("SCR review: result=%d, stop_status=%d (diagnostic only)\n",
+       ret, stm32_scr_stop_status(priv->dev, key));
+  return ret;
+}
+
+#endif
 
 /****************************************************************************
  * Name: mmcsd_decode_csd

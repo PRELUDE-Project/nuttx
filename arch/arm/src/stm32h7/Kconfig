@@ -1830,6 +1830,22 @@ endmenu # U[S]ART Configuration
 menu "SD/MMC Configuration"
 	depends on STM32H7_SDMMC
 
+config SD_SCR_CONTAINMENT_REVIEW
+	bool "Experimental H753 SCR lifetime containment"
+	default n
+	depends on ARCH_CHIP_STM32H753ZI && MMCSD_SDIO
+	depends on !SMP && !ARCH_HIPRI_INTERRUPT && !ARMV7M_DCACHE
+	---help---
+		Opt-in review implementation, not validated on hardware. Receives SCR
+		into persistent AXI SRAM and retains that storage after an error.
+		Normal release requires qualified single-buffer DATAEND, ownership,
+		command completion and register checks. Unsupported silicon, memory
+		placement or active D-cache is rejected. Fault recovery is not
+		implemented: a quarantined controller rejects subsequent operations.
+		Does not establish physical abort completion or authorize flashing.
+		Leave disabled for existing configurations unless explicitly reviewing
+		this implementation with the documented hardware prerequisites.
+
 config STM32H7_SDMMC_XFRDEBUG
 	bool "SDMMC transfer debug"
 	depends on DEBUG_FS_INFO
