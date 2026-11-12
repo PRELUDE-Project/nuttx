@@ -25,6 +25,10 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#if defined(CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW) && !defined(CONFIG_SD_SCR_CONTAINMENT_REVIEW)
+#error lease-only diagnostic requires SCR containment
+#endif
+
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -344,6 +348,9 @@
 struct stm32_dev_s
 {
   struct sdio_dev_s  dev;             /* Standard, base SDIO interface */
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  bool scr_rx_setup;
+#endif
 
   /* STM32-specific extensions */
 
@@ -417,6 +424,10 @@ struct stm32_dev_s
           aligned_data(ARMV7M_DCACHE_LINESIZE);
 #endif
 };
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+_Static_assert(offsetof(struct stm32_dev_s, dev) == 0, "SDIO base must remain first");
+#endif
+
 
 /* Register logging support */
 
@@ -968,6 +979,9 @@ int stm32_scr_claim(struct sdio_dev_s *dev, uint8_t **arena,
     {
       priv->scrkey = *key;
       priv->scr_phase = 0;
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+      priv->scr_rx_setup = false;
+#endif
       priv->scr_completed = false;
       sdmmc_putreg32(priv, STM32_SDMMC_STA_DATAEND, STM32_SDMMC_ICR_OFFSET);
       if ((sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
@@ -2818,6 +2832,14 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
   irqstate_t scrflags = enter_critical_section();
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  /* Boot-time diagnostic restriction, not a recovery or DMA-stop method. */
+  if (priv->scrlease.state != SCR_LEASE_ACTIVE || priv->scr_rx_setup)
+    {
+      leave_critical_section(scrflags);
+      return -ENOTSUP;
+    }
+#endif
   if (scr_denied(priv) || (priv->scrlease.state == SCR_LEASE_ACTIVE && (priv->scr_completed || buffer != priv->scrlease.arena || nbytes != 8)))
     {
       leave_critical_section(scrflags);
@@ -2825,6 +2847,10 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
     }
 
 #endif
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  priv->scr_rx_setup = true;
+#endif
+
   irqstate_t flags;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
@@ -3818,6 +3844,14 @@ static int stm32_dmarecvsetup(struct sdio_dev_s *dev,
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
   irqstate_t scrflags = enter_critical_section();
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  /* Boot-time diagnostic restriction, not a recovery or DMA-stop method. */
+  if (priv->scrlease.state != SCR_LEASE_ACTIVE || priv->scr_rx_setup)
+    {
+      leave_critical_section(scrflags);
+      return -ENOTSUP;
+    }
+#endif
   if (scr_denied(priv) || (priv->scrlease.state == SCR_LEASE_ACTIVE && (priv->scr_completed || buffer != priv->scrlease.arena || buflen != 8)))
     {
       leave_critical_section(scrflags);
@@ -3825,6 +3859,10 @@ static int stm32_dmarecvsetup(struct sdio_dev_s *dev,
     }
 
 #endif
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  priv->scr_rx_setup = true;
+#endif
+
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
 #if defined(CONFIG_ARCH_HAVE_SDIO_PREFLIGHT)

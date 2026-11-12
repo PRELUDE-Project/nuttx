@@ -25,6 +25,10 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+#include <nuttx/irq.h>
+#include <nuttx/mmcsd_scrdiag.h>
+#endif
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
 #  include <nuttx/scr_lease_review.h>
 #endif
@@ -3973,6 +3977,9 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
     }
 
   mmcsd_decode_scr(priv, scr);
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  return OK; /* diagnostic ends at SCR, no later bus-width switch */
+#endif
 
   if ((priv->caps & SDIO_CAPS_4BIT) != 0)
     {
@@ -4701,6 +4708,35 @@ static FAR const char *mmc_get_mode_name(uint8_t mode)
  *     be initialized and ready to use.
  *
  ****************************************************************************/
+
+
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+/* Trusted manual caller, no block device registration or media callbacks.
+ * Persistent state is retained on every result. Never a recovery API.
+ */
+int mmcsd_scr_diagnostic(struct sdio_dev_s *dev)
+{
+  static struct mmcsd_state_s state;
+  static bool started;
+  irqstate_t flags = enter_critical_section();
+  if (started || dev == NULL)
+    {
+      leave_critical_section(flags);
+      return dev == NULL ? -EINVAL : -EBUSY;
+    }
+  started = true;
+  leave_critical_section(flags);
+  state.dev = dev;
+  state.caps = SDIO_CAPABILITIES(dev);
+  state.buswidth = MMCSD_SCR_BUSWIDTH_1BIT;
+  int ret = SDIO_ATTACH(dev);
+  if (ret != OK) return ret;
+  ret = mmcsd_cardidentify(&state);
+  if (ret != OK) return ret;
+  if (!IS_SD(state.type)) return -ENOTSUP;
+  return mmcsd_sdinitialize(&state);
+}
+#endif
 
 int mmcsd_slotinitialize(int minor, FAR struct sdio_dev_s *dev)
 {
