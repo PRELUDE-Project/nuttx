@@ -494,7 +494,7 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 {
   int ret;
 #ifdef CONFIG_SDIO_DMA
-  bool drop = false;
+  bool drop = (priv->caps & SDIO_CAPS_DMASUPPORTED) == 0;
 #endif
 
 #if defined(CONFIG_SDIO_DMA) && defined(CONFIG_ARCH_HAVE_SDIO_PREFLIGHT)
@@ -539,7 +539,12 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
   if (drop)
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, (FAR uint8_t *)scr, 8);
+      ret = SDIO_RECVSETUP(priv->dev, (FAR uint8_t *)scr, 8);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP for SCR failed: %d\n", ret);
+          return ret;
+        }
     }
 
   SDIO_WAITENABLE(priv->dev,
