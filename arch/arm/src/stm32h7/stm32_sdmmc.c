@@ -1664,6 +1664,7 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
   uint32_t enabled;
+  uint32_t status;
   uint32_t pending;
 #ifndef CONFIG_STM32H7_SDMMC_IDMA
   irqstate_t flags;
@@ -1681,7 +1682,7 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
    * bits remaining, then we have work to do here.
    */
 
-  while ((enabled = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
+  while ((enabled = (status = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET)) &
           sdmmc_getreg32(priv, STM32_SDMMC_MASK_OFFSET)) != 0)
     {
       /* Handle in progress, interrupt driven data transfers ****************/
@@ -1751,6 +1752,17 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
               stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE |
                                       SDIOWAIT_ERROR);
+            }
+          else if ((pending & STM32_SDMMC_STA_DATAEND) != 0 &&
+                   (status & (STM32_SDMMC_STA_IDMATE |
+                              STM32_SDMMC_STA_DABORT)) != 0)
+            {
+              /* These status flags need not be enabled in MASK.  DATAEND
+               * does not authorize copying a failed or aborted receive.
+               */
+
+              stm32_endtransfer(priv,
+                                SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
             }
           else
             {
