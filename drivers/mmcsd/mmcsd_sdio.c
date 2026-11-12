@@ -1314,7 +1314,15 @@ static bool mmcsd_wrprotected(FAR struct mmcsd_state_s *priv)
    * SDIO driver via SDIO_WRPROTECTED)
    */
 
+#ifdef CONFIG_MMCSD_READONLY
+  /* Configuration-enforced read-only applies even when the card and socket
+   * report writable media. All SDIO block-write paths use this predicate.
+   */
+
+  return true;
+#else
   return (priv->wrprotect || priv->locked || SDIO_WRPROTECTED(priv->dev));
+#endif
 }
 
 /****************************************************************************
