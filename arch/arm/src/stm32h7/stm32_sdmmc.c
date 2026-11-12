@@ -998,8 +998,23 @@ int stm32_scr_finish(struct sdio_dev_s *dev, struct scr_lease_key key,
     goto out;
   if (result < 0)
     {
-      scr_seal(priv, result);
-      ret = result;
+      /* A sealed lease rejects later command admission with EBUSY. Keep
+       * the cause (for example watchdog-arm failure), not that consequence.
+       * Other operation errors still take precedence over a later cancel.
+       */
+
+      if (result == -EBUSY &&
+          priv->scrlease.state == SCR_LEASE_QUARANTINED &&
+          priv->scrlease.result < 0)
+        {
+          ret = priv->scrlease.result;
+        }
+      else
+        {
+          scr_seal(priv, result);
+          ret = result;
+        }
+
       goto out;
     }
   if (priv->scrlease.state != SCR_LEASE_ACTIVE)

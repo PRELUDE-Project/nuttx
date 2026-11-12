@@ -100,7 +100,8 @@ static struct stm32_dev_s *observed;
 static void nxsem_post(int*s){assert(observed->buffer==NULL && observed->xfrmask==0 && observed->waitmask==0);(*s)++;notifications++;}
 
 static int wd_cancel(bool*w){*w=false;return 0;}
-static int wd_start(bool*w,int delay,void(*f)(wdparm_t),wdparm_t a){(void)delay;(void)f;(void)a;*w=true;return 0;}
+static int injected_wd_errno;
+static int wd_start(bool*w,int delay,void(*f)(wdparm_t),wdparm_t a){(void)delay;(void)f;(void)a;if(injected_wd_errno)return injected_wd_errno;*w=true;return 0;}
 static void stm32_sdmmc_fifo_monitor(wdparm_t x){(void)x;}
 static void stm32_recvfifo(struct stm32_dev_s*p){(void)p;fifo++;status&=~STM32_SDMMC_STA_RXFIFOHF;}
 static void stm32_sendfifo(struct stm32_dev_s*p){(void)p;fifo++;status&=~STM32_SDMMC_STA_TXFIFOHE;}
@@ -235,8 +236,23 @@ int stm32_scr_finish(struct sdio_dev_s *dev, struct scr_lease_key key,
     goto out;
   if (result < 0)
     {
-      scr_seal(priv, result);
-      ret = result;
+      /* A sealed lease rejects later command admission with EBUSY. Keep
+       * the cause (for example watchdog-arm failure), not that consequence.
+       * Other operation errors still take precedence over a later cancel.
+       */
+
+      if (result == -EBUSY &&
+          priv->scrlease.state == SCR_LEASE_QUARANTINED &&
+          priv->scrlease.result < 0)
+        {
+          ret = priv->scrlease.result;
+        }
+      else
+        {
+          scr_seal(priv, result);
+          ret = result;
+        }
+
       goto out;
     }
   if (priv->scrlease.state != SCR_LEASE_ACTIVE)
@@ -1506,9 +1522,7 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
               if ((pending & STM32_SDMMC_STA_DATAEND) != 0)
                 {
-    
-
-              /* Handle any data remaining the RX FIFO.  If the RX FIFO is
+                  /* Handle any data remaining the RX FIFO.  If the RX FIFO is
                    * less than half full at the end of the transfer, then no
                    * half-full interrupt will be received.
                    */
@@ -1622,9 +1636,9 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
   return OK;
 }
-static int irqfirst,carderror,transporterror;static unsigned calls16,calls55,calls51;
+static int timer_before_command;static int irqfirst,carderror,transporterror;static unsigned calls16,calls55,calls51;
 struct mmcsd_state_s {struct sdio_dev_s*dev;uint32_t caps,selblocklen,rca;bool locked;};
-static int send_hook(struct sdio_dev_s*d,uint32_t cmd,uint32_t arg){int r=stm32_sendcmd(d,cmd,arg);if(r)return r;unsigned index=cmd&MMCSD_CMDIDX_MASK;regs[9]=index;regs[10]=0;regs[0]=(1u<<7);if(index==16)calls16++;if(index==55)calls55++;if(index==51){calls51++;if(transporterror){regs[0]=STM32_SDMMC_STA_CCRCFAIL;return 0;}if(carderror)regs[10]=MMCSD_R1_ERRORMASK;
+static int send_hook(struct sdio_dev_s*d,uint32_t cmd,uint32_t arg){if(timer_before_command && (cmd&MMCSD_CMDIDX_MASK)==55){timer_before_command=0;stm32_eventtimeout((wdparm_t)d);}int r=stm32_sendcmd(d,cmd,arg);if(r)return r;unsigned index=cmd&MMCSD_CMDIDX_MASK;regs[9]=index;regs[10]=0;regs[0]=(1u<<7);if(index==16)calls16++;if(index==55)calls55++;if(index==51){calls51++;if(transporterror){regs[0]=STM32_SDMMC_STA_CCRCFAIL;return 0;}if(carderror)regs[10]=MMCSD_R1_ERRORMASK;
 struct stm32_dev_s*p=(void*)d;assert(regs[8]==(uintptr_t)p->scrlease.arena);assert(regs[7]==8);assert((regs[4]&0xf2)==0x32);memset((void*)regs[8],0x5a,8);regs[6]=0;
 if(irqfirst){regs[0]|=STM32_SDMMC_STA_DATAEND;assert(stm32_sdmmc_interrupt(0,NULL,p)==0);}}
 return 0;}
@@ -1884,6 +1898,21 @@ struct stm32_dev_s stack={0};uint8_t*aa;struct scr_lease_key kk;memset(regs,0,si
 assert(scr_lease_begin(&stack.scrlease,1,stack.scrlease.arena,&kk)==0);stack.scrkey=kk;stack.scr_phase=4;stack.scr_completed=true;uint32_t rejected[2]={123,456};assert(stm32_scr_finish(&stack.dev,kk,0,rejected)==-EAGAIN);assert(rejected[0]==123&&rejected[1]==456&&stack.scrlease.state==SCR_LEASE_QUARANTINED);
 
 void*map=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);assert(map!=MAP_FAILED);assert((uintptr_t)map==0x24000000);assert(sizeof(struct stm32_dev_s)<=4096);
+{
+ struct stm32_dev_s *d=map;memset(d,0,sizeof *d);observed=d;memset(regs,0,sizeof regs);ccr=depth=notifications=caches=fifo=0;chipid=0x20030450;calls16=calls55=calls51=0;irqfirst=carderror=transporterror=0;timer_before_command=1;
+ struct mmcsd_state_s u={.dev=&d->dev,.caps=1,.rca=1};uint32_t out[2]={123,456};int r=mmcsd_get_scr(&u,out);assert(r==-ETIMEDOUT);assert(d->scrlease.state==SCR_LEASE_QUARANTINED);assert(calls55==0&&calls51==0);assert(out[0]==123&&out[1]==456);puts("PASS actual eventtimeout between waitenable and CMD55 preserves ETIMEDOUT");
+}
+for(int which=0;which<3;which++){
+ struct stm32_dev_s *d=map;memset(d,0,sizeof *d);observed=d;memset(regs,0,sizeof regs);uint8_t*arena;struct scr_lease_key key;assert(stm32_scr_claim(&d->dev,&arena,&key)==0);assert(stm32_cancel(&d->dev)==-EINPROGRESS);uint32_t out[2]={123,456};int original=which==0?-EIO:which==1?-ETIMEDOUT:-EBUSY;
+ struct scr_lease_key wrong=key;wrong.owner++;assert(stm32_scr_finish(&d->dev,wrong,original,out)==-ESTALE);
+ assert(stm32_scr_finish(&d->dev,key,original,out)==(which==2?-ECANCELED:original));assert(out[0]==123&&out[1]==456);
+}
+for(int failure=0;failure<2;failure++){
+ struct stm32_dev_s *d=map;memset(d,0,sizeof *d);observed=d;memset(regs,0,sizeof regs);ccr=depth=notifications=caches=fifo=0;chipid=0x20030450;calls16=calls55=calls51=0;irqfirst=0;carderror=transporterror=0;injected_wd_errno=failure?-EINVAL:-EIO;
+ struct mmcsd_state_s u={.dev=&d->dev,.caps=1,.rca=1};uint32_t out[2]={123,456};int r=mmcsd_get_scr(&u,out);
+ fprintf(stderr,"wd errno=%d returned=%d sticky=%d\n",injected_wd_errno,r,d->scrlease.result);
+ assert(r==injected_wd_errno);assert(d->scrlease.state==SCR_LEASE_QUARANTINED);assert(out[0]==123&&out[1]==456);assert(calls55==0&&calls51==0);injected_wd_errno=0;
+}
 for(int order=0;order<2;order++)for(int err=0;err<3;err++){
 struct stm32_dev_s *mapped=map;memset(mapped,0,sizeof *mapped);
 #define p (*mapped)
