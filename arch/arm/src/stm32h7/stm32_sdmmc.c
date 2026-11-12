@@ -379,7 +379,6 @@ struct stm32_dev_s
   uint8_t scr_phase;
   bool scr_completed;
   uint32_t scr_terminal_sta_before;
-  uint32_t scr_terminal_dcount;
   uint32_t scr_terminal_idma;
   uint32_t scr_terminal_sta_after;
 #endif
@@ -2092,8 +2091,6 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
                   /* Evidence only: no copy, invalidate, clear, or release. */
                   priv->scr_terminal_sta_before =
                     sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
-                  priv->scr_terminal_dcount =
-                    sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET);
                   priv->scr_terminal_idma =
                     sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
                   priv->scr_terminal_sta_after =
