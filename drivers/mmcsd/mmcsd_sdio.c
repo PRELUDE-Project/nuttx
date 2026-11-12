@@ -4490,18 +4490,23 @@ static int mmcsd_probe(FAR struct mmcsd_state_s *priv)
               priv->mediachanged = true;
             }
 
-          /* When the card is identified, we have probed this card */
+          /* Publish the card only after initialization succeeds. */
 
-          priv->probed = true;
-          for (i = 0; i < MMCSD_PART_COUNT; i++)
+          if (ret == OK)
             {
-              priv->part[i].priv = priv;
-              if (priv->part[i].nblocks != 0)
+              /* When the card is identified, we have probed this card */
+
+              priv->probed = true;
+              for (i = 0; i < MMCSD_PART_COUNT; i++)
                 {
-                  snprintf(devname, sizeof(devname), "/dev/mmcsd%d%s",
-                           priv->minor, g_partname[i]);
-                  register_blockdriver(devname, &g_bops, 0666,
-                                       &priv->part[i]);
+                  priv->part[i].priv = priv;
+                  if (priv->part[i].nblocks != 0)
+                    {
+                      snprintf(devname, sizeof(devname), "/dev/mmcsd%d%s",
+                               priv->minor, g_partname[i]);
+                      register_blockdriver(devname, &g_bops, 0666,
+                                           &priv->part[i]);
+                    }
                 }
             }
         }
