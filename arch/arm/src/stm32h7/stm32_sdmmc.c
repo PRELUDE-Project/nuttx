@@ -1057,6 +1057,27 @@ int stm32_sector_claim(struct sdio_dev_s *dev, uint64_t lba, uint64_t capacity,
 }
 #endif
 
+/* Reject SCR output aliases into either controller, including its embedded
+ * arena. Use subtraction so the interval comparison cannot wrap. */
+static bool scr_finish_output_denied(uintptr_t out)
+{
+  if (out > UINTPTR_MAX - 7u)
+    return true;
+#ifdef CONFIG_STM32H7_SDMMC1
+  uintptr_t base1 = (uintptr_t)&g_sdmmcdev1;
+  if (out <= base1 ? base1 - out < 8u :
+                    out - base1 < sizeof(g_sdmmcdev1))
+    return true;
+#endif
+#ifdef CONFIG_STM32H7_SDMMC2
+  uintptr_t base2 = (uintptr_t)&g_sdmmcdev2;
+  if (out <= base2 ? base2 - out < 8u :
+                    out - base2 < sizeof(g_sdmmcdev2))
+    return true;
+#endif
+  return false;
+}
+
 int stm32_scr_finish(struct sdio_dev_s *dev, struct scr_lease_key key,
                      int result, uint32_t output[2])
 {
@@ -1101,6 +1122,13 @@ int stm32_scr_finish(struct sdio_dev_s *dev, struct scr_lease_key key,
   if (priv->scrlease.state != SCR_LEASE_ACTIVE)
     {
       ret = priv->scrlease.result;
+      goto out;
+    }
+  /* Keep existing ownership/error precedence and the NULL contract. */
+  if (output != NULL && scr_finish_output_denied((uintptr_t)output))
+    {
+      scr_seal(priv, -EINVAL);
+      ret = -EINVAL;
       goto out;
     }
   sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
@@ -4694,3 +4722,4 @@ void sdio_set_sdio_card_isr(struct sdio_dev_s *dev,
 #endif
 
 #endif /* CONFIG_STM32H7_SDMMC1 || CONFIG_STM32H7_SDMMC2 */
+
