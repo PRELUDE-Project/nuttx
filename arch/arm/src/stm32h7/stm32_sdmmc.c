@@ -2890,6 +2890,19 @@ static int stm32_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
   irqstate_t scrflags = enter_critical_section();
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  /* Fixed-card SD identification only while no receive lease is active.
+   * Compare complete command encodings, not just command indices.
+   */
+  if (priv->scrlease.state == SCR_LEASE_IDLE &&
+      cmd != MMCSD_CMD0 && cmd != MMCSD_CMD2 && cmd != SD_CMD3 &&
+      cmd != MMCSD_CMD7S && cmd != SD_CMD8 && cmd != MMCSD_CMD9 &&
+      cmd != MMCSD_CMD13 && cmd != SD_CMD55 && cmd != SD_ACMD41)
+    {
+      leave_critical_section(scrflags);
+      return -ENOTSUP;
+    }
+#endif
   if (scr_denied(priv))
     {
       leave_critical_section(scrflags);
