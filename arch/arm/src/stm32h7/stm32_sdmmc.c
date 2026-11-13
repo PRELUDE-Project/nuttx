@@ -25,6 +25,13 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#if defined(CONFIG_SD_SECTOR_READ_REVIEW) && (!defined(CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW) || !defined(CONFIG_STM32H7_SDMMC_IDMA))
+#error sector review requires lease-only IDMA containment
+#endif
+#if defined(CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW) && !defined(CONFIG_SD_SCR_CONTAINMENT_REVIEW)
+#error lease-only diagnostic requires SCR containment
+#endif
+
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -45,11 +52,23 @@
 #include <nuttx/mmcsd.h>
 #include <nuttx/irq.h>
 #include <nuttx/cache.h>
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+#include <nuttx/sched.h>
+#include <nuttx/scr_lease_review.h>
+#if !defined(CONFIG_SD_SCR_CONTAINMENT_REVIEW) || defined(CONFIG_SMP) || defined(CONFIG_ARCH_HIPRI_INTERRUPT) || defined(CONFIG_ARMV7M_DCACHE)
+# error "Review-only UP cache-off build required"
+#endif
+#endif
 
 #include <arch/board/board.h>
 
 #include "chip.h"
 #include "arm_internal.h"
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+#include "nvic.h"
+#include "hardware/stm32h7xxx_dbgmcu.h"
+#include <arch/barriers.h>
+#endif
 #include "stm32_dtcm.h"
 #include "stm32_dma.h"
 #include "stm32_gpio.h"
@@ -81,7 +100,7 @@
  * Therefore even when IDMA is not used, the IDMA still has to be used to
  * service the FIFO to receive less than FIFO_SIZE_IN_BYTES / 2 to a local
  * buffer. When the FIFO Half Full and Full interrupt do fire the FIFO will
- * be monitored off the an HP work thread for a residual of less than
+ * be monitored by a watchdog interrupt for a residual of less than
  * FIFO_SIZE_IN_BYTES / 2.
  *
  * HW Issues when using IDMA
@@ -332,6 +351,9 @@
 struct stm32_dev_s
 {
   struct sdio_dev_s  dev;             /* Standard, base SDIO interface */
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  bool scr_rx_setup;
+#endif
 
   /* STM32-specific extensions */
 
@@ -359,6 +381,23 @@ struct stm32_dev_s
 
   /* Interrupt mode data transfer support */
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  struct scr_lease_review scrlease;
+  struct scr_lease_key scrkey;
+  bool scrinitializing;
+  uintptr_t scrinitowner;
+  uint8_t scr_phase;
+  bool scr_completed;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  bool sector_mode;
+  bool sector_attempted;
+  bool scr_success_seen;
+  uint32_t sector_argument;
+#endif
+  uint32_t scr_terminal_sta_before;
+  uint32_t scr_terminal_idma;
+  uint32_t scr_terminal_sta_after;
+#endif
   uint32_t          *buffer;          /* Address of current R/W buffer */
   size_t             remaining;       /* Number of bytes remaining in the transfer */
   uint32_t           xfrmask;         /* Interrupt enables for data transfer */
@@ -382,7 +421,7 @@ struct stm32_dev_s
   uint32_t           blocksize;       /* Current block size */
   uint32_t           receivecnt;      /* Real count to receive */
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
-  struct work_s      cbfifo;          /* Monitor for Lame FIFO */
+  struct wdog_s      fifowdog;        /* Monitor for Lame FIFO */
 #endif
   uint8_t            rxfifo[FIFO_SIZE_IN_BYTES] /* To offload with IDMA and support un-alinged buffers */
                      aligned_data(ARMV7M_DCACHE_LINESIZE);
@@ -394,6 +433,10 @@ struct stm32_dev_s
           aligned_data(ARMV7M_DCACHE_LINESIZE);
 #endif
 };
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+_Static_assert(offsetof(struct stm32_dev_s, dev) == 0, "SDIO base must remain first");
+#endif
+
 
 /* Register logging support */
 
@@ -405,7 +448,6 @@ struct stm32_sdioregs_s
   uint16_t dctrl;
   uint32_t dtimer;
   uint32_t dlen;
-  uint32_t dcount;
   uint32_t sta;
   uint32_t mask;
 };
@@ -863,6 +905,485 @@ static void stm32_configxfrints(struct stm32_dev_s *priv, uint32_t xfrmask)
     }
 
   leave_critical_section(flags);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+}
+
+/* Review-only: containment, NOT hardware stop or recovery authority. */
+static bool scr_closed(struct stm32_dev_s *priv)
+{
+  return
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+         priv->scrlease.state == SCR_LEASE_HANDOFF ||
+#endif
+         priv->scrlease.state == SCR_LEASE_QUARANTINED ||
+         priv->scrlease.state == SCR_LEASE_RETIRED;
+}
+static bool scr_denied(struct stm32_dev_s *priv)
+{
+  return scr_closed(priv) || priv->scrinitializing ||
+    (priv->scrlease.state == SCR_LEASE_ACTIVE &&
+     (up_interrupt_context() || priv->scrlease.owner != (uintptr_t)nxsched_gettid()));
+}
+static void scr_close_producers(struct stm32_dev_s *priv)
+{
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  wd_cancel(&priv->waitwdog);
+#endif
+  stm32_configxfrints(priv, 0);
+  priv->waitmask = 0;
+  sdmmc_putreg32(priv, 0, STM32_SDMMC_MASK_OFFSET);
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+#endif
+  priv->buffer = NULL;
+  priv->remaining = 0;
+  priv->receivecnt = 0;
+  priv->unaligned_rx = false;
+}
+static void scr_seal(struct stm32_dev_s *priv, int error)
+{
+  irqstate_t f = enter_critical_section();
+  if (priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      scr_lease_end(&priv->scrlease, priv->scrkey, error);
+      scr_close_producers(priv);
+    }
+  leave_critical_section(f);
+}
+#define SCR_HW_ERRORS (STM32_SDMMC_STA_IDMATE | STM32_SDMMC_STA_DABORT | \
+                       STM32_SDMMC_STA_DCRCFAIL | STM32_SDMMC_STA_DTIMEOUT | \
+                       STM32_SDMMC_STA_RXOVERR | STM32_SDMMC_STA_TXUNDERR)
+#define SCR_HW_ACTIVE (STM32_SDMMC_STA_DPSMACT | STM32_SDMMC_STA_CPSMACT)
+
+/* The review supports only dedicated, aligned AXI SRAM storage. Do not
+ * infer DMA accessibility from alignment or the current ELF alone.
+ */
+static bool scr_arena_qualified(uintptr_t address)
+{
+  return (address & 31u) == 0 && address >= STM32_AXISRAM_BASE &&
+         address - STM32_AXISRAM_BASE <= STM32H7_SRAM_SIZE - sizeof(((struct scr_lease_review *)0)->arena);
+}
+
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+#define SECTOR_R1_ERRORMASK ((uint32_t)0xfdffe088) /* fixed mmcsd_sdio.h */
+static size_t scr_receive_size(struct stm32_dev_s *priv)
+{
+  return priv->sector_mode ? 512 : 8;
+}
+#else
+#define scr_receive_size(priv) 8u
+#endif
+
+static bool scr_platform_qualified(void)
+{
+  uint32_t id = getreg32(STM32_DBGMCU_IDC);
+  uint32_t revision = id >> DBGMCU_IDCODE_REVID_SHIFT;
+  /* ES0392 Rev16: this candidate does not implement the Y/W AXI SRAM
+   * read-corruption workaround. Unknown silicon is not qualified. */
+  return (id & DBGMCU_IDCODE_DEVID_MASK) == STM32_IDCODE_DEVID &&
+         (revision == 0x2001 || revision == 0x2003 || revision == 0x2007) &&
+         (getreg32(NVIC_CFGCON) & NVIC_CFGCON_DC) == 0;
+}
+int stm32_scr_claim(struct sdio_dev_s *dev, uint8_t **arena,
+                    struct scr_lease_key *key)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t f = enter_critical_section();
+  int ret = -EBUSY;
+  uint32_t sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  uint32_t idma = sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
+  if (!up_interrupt_context() && !priv->scrinitializing &&
+      priv->remaining == 0 && priv->xfrmask == 0 &&
+      priv->waitevents == 0 && priv->waitmask == 0 &&
+      scr_platform_qualified() &&
+      scr_arena_qualified((uintptr_t)priv->scrlease.arena) &&
+      (sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE)) == 0 &&
+      (idma & STM32_SDMMC_IDMACTRLR_IDMAEN) == 0)
+    ret = scr_lease_begin(&priv->scrlease, (uintptr_t)nxsched_gettid(),
+                          priv->scrlease.arena, key);
+  if (ret == 0)
+    {
+      priv->scrkey = *key;
+      priv->scr_phase = 0;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      priv->sector_mode = false;
+#endif
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+      priv->scr_rx_setup = false;
+#endif
+      priv->scr_completed = false;
+      sdmmc_putreg32(priv, STM32_SDMMC_STA_DATAEND, STM32_SDMMC_ICR_OFFSET);
+      if ((sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
+           (SCR_HW_ERRORS | SCR_HW_ACTIVE | STM32_SDMMC_STA_DATAEND)) != 0)
+        {
+          scr_seal(priv, -EIO);
+          leave_critical_section(f);
+          return -EIO;
+        }
+      *arena = priv->scrlease.arena;
+    }
+  leave_critical_section(f);
+  return ret;
+}
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+int stm32_sector_claim(struct sdio_dev_s *dev, uint64_t lba, uint64_t capacity,
+                        bool block_addressed_sd, uint8_t **arena,
+                        struct scr_lease_key *key)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t f = enter_critical_section();
+  int ret = -EBUSY;
+  if (!block_addressed_sd || capacity == 0 ||
+      capacity > (uint64_t)UINT32_MAX + 1 || lba >= capacity ||
+      lba > UINT32_MAX || arena == NULL || key == NULL)
+    { leave_critical_section(f); return -EINVAL; }
+  if (up_interrupt_context() || !priv->scr_success_seen ||
+      priv->sector_attempted || priv->scrlease.state != SCR_LEASE_HANDOFF)
+    { leave_critical_section(f); return -EBUSY; }
+  /* One attempt, even when the clean-handoff checks reject it. */
+  priv->sector_attempted = true;
+  priv->scrlease.state = SCR_LEASE_IDLE;
+  ret = stm32_scr_claim(dev, arena, key);
+  if (ret == OK)
+    {
+      priv->sector_mode = true;
+      priv->sector_argument = (uint32_t)lba;
+    }
+  if (ret != OK && priv->scrlease.state == SCR_LEASE_IDLE)
+    {
+      priv->scrlease.state = SCR_LEASE_RETIRED;
+      priv->scrlease.result = ret;
+      priv->scrlease.cpu_destination = NULL;
+    }
+  leave_critical_section(f);
+  return ret;
+}
+#endif
+
+/* Reject SCR output aliases into either controller, including its embedded
+ * arena. Use subtraction so the interval comparison cannot wrap. */
+static bool scr_finish_output_denied(uintptr_t out)
+{
+  if (out > UINTPTR_MAX - 7u)
+    return true;
+#ifdef CONFIG_STM32H7_SDMMC1
+  uintptr_t base1 = (uintptr_t)&g_sdmmcdev1;
+  if (out <= base1 ? base1 - out < 8u :
+                    out - base1 < sizeof(g_sdmmcdev1))
+    return true;
+#endif
+#ifdef CONFIG_STM32H7_SDMMC2
+  uintptr_t base2 = (uintptr_t)&g_sdmmcdev2;
+  if (out <= base2 ? base2 - out < 8u :
+                    out - base2 < sizeof(g_sdmmcdev2))
+    return true;
+#endif
+  return false;
+}
+
+int stm32_scr_finish(struct sdio_dev_s *dev, struct scr_lease_key key,
+                     int result, uint32_t output[2])
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags = enter_critical_section();
+  uint32_t sta;
+  uint32_t idma;
+  int ret = -ESTALE;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if (priv->sector_mode)
+    { leave_critical_section(flags); return -EINVAL; }
+#endif
+  if (!scr_lease_matches(&priv->scrlease, key) || up_interrupt_context() ||
+      key.owner != (uintptr_t)nxsched_gettid() ||
+      priv->scrlease.state == SCR_LEASE_IDLE)
+    goto out;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if (priv->scrlease.state == SCR_LEASE_HANDOFF)
+    { ret = -EALREADY; goto out; }
+#endif
+  if (result < 0)
+    {
+      /* A sealed lease rejects later command admission with EBUSY. Keep
+       * the cause (for example watchdog-arm failure), not that consequence.
+       * Other operation errors still take precedence over a later cancel.
+       */
+
+      if (result == -EBUSY &&
+          priv->scrlease.state == SCR_LEASE_QUARANTINED &&
+          priv->scrlease.result < 0)
+        {
+          ret = priv->scrlease.result;
+        }
+      else
+        {
+          scr_seal(priv, result);
+          ret = result;
+        }
+
+      goto out;
+    }
+  if (priv->scrlease.state != SCR_LEASE_ACTIVE)
+    {
+      ret = priv->scrlease.result;
+      goto out;
+    }
+  /* Keep existing ownership/error precedence and the NULL contract. */
+  if (output != NULL && scr_finish_output_denied((uintptr_t)output))
+    {
+      scr_seal(priv, -EINVAL);
+      ret = -EINVAL;
+      goto out;
+    }
+  sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  idma = sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
+  if (!output || !priv->scr_completed || priv->scr_phase != 4 ||
+      !scr_platform_qualified() ||
+      !scr_arena_qualified((uintptr_t)priv->scrlease.arena) ||
+      (sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE)) != 0 ||
+      (sta & STM32_SDMMC_STA_DATAEND) == 0 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_DLEN_OFFSET) != 8 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_IDMABASE0R_OFFSET) !=
+        (uintptr_t)priv->scrlease.arena ||
+      (idma & STM32_SDMMC_IDMACTRLR_IDMABMODE) != 0 ||
+      (sdmmc_getreg32(priv, STM32_SDMMC_DCTRL_OFFSET) &
+       (STM32_SDMMC_DCTRL_DTDIR | STM32_SDMMC_DCTRL_DTMODE_MASK |
+        STM32_SDMMC_DCTRL_DBLOCKSIZE_MASK)) !=
+       (STM32_SDMMC_DCTRL_DTDIR | STM32_SDMMC_DCTRL_DTMODE_BLOCK |
+        STM32_SDMMC_DCTRL_8BYTES) || priv->xfrmask != 0 ||
+      priv->waitmask != 0 || priv->buffer != NULL)
+    {
+      scr_seal(priv, -EAGAIN);
+      ret = -EAGAIN;
+      goto out;
+    }
+  /* RM0433 single-buffer DATAEND denotes IDMA+data completion.
+   * IDMAEN is writable only after observed DPSM inactive. */
+  sdmmc_putreg32(priv, 0, STM32_SDMMC_IDMACTRLR_OFFSET);
+  UP_DSB();
+  sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  if (sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET) != 0 ||
+      (sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE)) != 0 ||
+      (sta & STM32_SDMMC_STA_DATAEND) == 0 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0)
+    {
+      scr_seal(priv, -EIO);
+      ret = -EIO;
+      goto out;
+    }
+  UP_DSB();
+  sdmmc_putreg32(priv, STM32_SDMMC_STA_DATAEND, STM32_SDMMC_ICR_OFFSET);
+  sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  if ((sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE | STM32_SDMMC_STA_DATAEND)) != 0)
+    {
+      scr_seal(priv, -EIO);
+      ret = -EIO;
+      goto out;
+    }
+  memcpy(output, priv->scrlease.arena, 8);
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  priv->scr_success_seen = true;
+#endif
+  priv->scrlease.cpu_destination = NULL;
+#ifndef CONFIG_SD_SECTOR_READ_REVIEW
+  priv->scrlease.owner = 0;
+#endif
+  priv->scrlease.result = 0;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  priv->scrlease.state = SCR_LEASE_HANDOFF;
+#else
+  priv->scrlease.state = SCR_LEASE_IDLE;
+#endif
+  priv->scr_completed = false;
+  priv->scr_phase = 0;
+  ret = 0;
+out:
+  leave_critical_section(flags);
+  return ret;
+}
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+static bool sector_output_overlaps(uintptr_t out)
+{
+#ifdef CONFIG_STM32H7_SDMMC1
+  if (out < (uintptr_t)&g_sdmmcdev1 + sizeof(g_sdmmcdev1) &&
+      out + 512u > (uintptr_t)&g_sdmmcdev1) return true;
+#endif
+#ifdef CONFIG_STM32H7_SDMMC2
+  if (out < (uintptr_t)&g_sdmmcdev2 + sizeof(g_sdmmcdev2) &&
+      out + 512u > (uintptr_t)&g_sdmmcdev2) return true;
+#endif
+  return false;
+}
+#endif
+
+int stm32_sector_finish(struct sdio_dev_s *dev, struct scr_lease_key key,
+                     int result, uint8_t output[512])
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags = enter_critical_section();
+  uint32_t sta;
+  uint32_t idma;
+  int ret = -ESTALE;
+  uintptr_t dst = (uintptr_t)output;
+  if (!priv->sector_mode)
+    { leave_critical_section(flags); return -EINVAL; }
+  if (!scr_lease_matches(&priv->scrlease, key) || up_interrupt_context() ||
+      key.owner != (uintptr_t)nxsched_gettid() ||
+      priv->scrlease.state == SCR_LEASE_IDLE)
+    goto out;
+  if (result < 0)
+    {
+      /* A sealed lease rejects later command admission with EBUSY. Keep
+       * the cause (for example watchdog-arm failure), not that consequence.
+       * Other operation errors still take precedence over a later cancel.
+       */
+
+      if (priv->scrlease.state == SCR_LEASE_QUARANTINED &&
+          priv->scrlease.result < 0)
+        {
+          ret = priv->scrlease.result;
+        }
+      else
+        {
+          scr_seal(priv, result);
+          ret = result;
+        }
+
+      goto out;
+    }
+  if (priv->scrlease.state != SCR_LEASE_ACTIVE)
+    {
+      ret = priv->scrlease.state == SCR_LEASE_RETIRED ? -EALREADY : priv->scrlease.result;
+      goto out;
+    }
+  if (!output || dst > UINTPTR_MAX - 512u || sector_output_overlaps(dst) ||
+      (dst < (uintptr_t)priv + sizeof(*priv) && dst + 512u > (uintptr_t)priv))
+    { scr_seal(priv, -EINVAL); ret = -EINVAL; goto out; }
+  sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  idma = sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
+  if (!output || !priv->scr_completed || priv->scr_phase != 2 ||
+      !scr_platform_qualified() ||
+      !scr_arena_qualified((uintptr_t)priv->scrlease.arena) ||
+      (sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE)) != 0 ||
+      (sta & STM32_SDMMC_STA_DATAEND) == 0 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_DLEN_OFFSET) != 512 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_IDMABASE0R_OFFSET) !=
+        (uintptr_t)priv->scrlease.arena ||
+      (idma & STM32_SDMMC_IDMACTRLR_IDMABMODE) != 0 ||
+      (sdmmc_getreg32(priv, STM32_SDMMC_DCTRL_OFFSET) &
+       (STM32_SDMMC_DCTRL_DTDIR | STM32_SDMMC_DCTRL_DTMODE_MASK |
+        STM32_SDMMC_DCTRL_DBLOCKSIZE_MASK)) !=
+       (STM32_SDMMC_DCTRL_DTDIR | STM32_SDMMC_DCTRL_DTMODE_BLOCK |
+        STM32_SDMMC_DCTRL_512BYTES) || priv->xfrmask != 0 ||
+      priv->waitmask != 0 || priv->buffer != NULL)
+    {
+      scr_seal(priv, -EAGAIN);
+      ret = -EAGAIN;
+      goto out;
+    }
+  /* RM0433 single-buffer DATAEND denotes IDMA+data completion.
+   * IDMAEN is writable only after observed DPSM inactive. */
+  sdmmc_putreg32(priv, 0, STM32_SDMMC_IDMACTRLR_OFFSET);
+  UP_DSB();
+  sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  if (sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET) != 0 ||
+      (sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE)) != 0 ||
+      (sta & STM32_SDMMC_STA_DATAEND) == 0 ||
+      sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0)
+    {
+      scr_seal(priv, -EIO);
+      ret = -EIO;
+      goto out;
+    }
+  UP_DSB();
+  sdmmc_putreg32(priv, STM32_SDMMC_STA_DATAEND, STM32_SDMMC_ICR_OFFSET);
+  sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+  if ((sta & (SCR_HW_ERRORS | SCR_HW_ACTIVE | STM32_SDMMC_STA_DATAEND)) != 0)
+    {
+      scr_seal(priv, -EIO);
+      ret = -EIO;
+      goto out;
+    }
+  memcpy(output, priv->scrlease.arena, 512);
+  priv->scrlease.cpu_destination = NULL;
+  /* Retain owner/key for diagnostics; never reopen controller admission. */
+  priv->scrlease.result = 0;
+  priv->scrlease.state = SCR_LEASE_RETIRED;
+  priv->scr_completed = false;
+  priv->scr_phase = 0;
+  ret = 0;
+out:
+  leave_critical_section(flags);
+  return ret;
+}
+#endif
+
+
+
+
+/* Reject output aliases into either controller before copying observations. */
+static bool scr_snapshot_overlap(uintptr_t out, uintptr_t base)
+{
+  return out <= base + sizeof(struct stm32_dev_s) - 1 &&
+         base <= out + sizeof(struct scr_hw_snapshot) - 1;
+}
+int stm32_scr_snapshot(struct sdio_dev_s *dev, struct scr_lease_key key,
+                       struct scr_hw_snapshot *out)
+{
+  struct stm32_dev_s *priv = NULL;
+  struct scr_hw_snapshot value = {0};
+  uintptr_t dest = (uintptr_t)out;
+  irqstate_t flags;
+  int ret = -ESTALE;
+  if (out == NULL || dest % _Alignof(struct scr_hw_snapshot) != 0 ||
+      dest > UINTPTR_MAX - sizeof(*out) + 1)
+    return -EINVAL;
+  if (up_interrupt_context()) return -EPERM;
+#ifdef CONFIG_STM32H7_SDMMC1
+  if (dev == &g_sdmmcdev1.dev) priv = &g_sdmmcdev1;
+  if (scr_snapshot_overlap(dest, (uintptr_t)&g_sdmmcdev1)) return -EINVAL;
+#endif
+#ifdef CONFIG_STM32H7_SDMMC2
+  if (dev == &g_sdmmcdev2.dev) priv = &g_sdmmcdev2;
+  if (scr_snapshot_overlap(dest, (uintptr_t)&g_sdmmcdev2)) return -EINVAL;
+#endif
+  if (priv == NULL) return -ENODEV;
+  flags = enter_critical_section();
+  if (scr_lease_matches(&priv->scrlease, key) &&
+      key.owner == (uintptr_t)nxsched_gettid() && !priv->scrinitializing)
+    {
+      value.version = 1;
+      value.state = priv->scrlease.state;
+      value.generation = priv->scrlease.generation;
+      value.sta_before = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+      value.mask = sdmmc_getreg32(priv, STM32_SDMMC_MASK_OFFSET);
+      value.idmactrl = sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
+      value.dlen = sdmmc_getreg32(priv, STM32_SDMMC_DLEN_OFFSET);
+      value.dctrl = sdmmc_getreg32(priv, STM32_SDMMC_DCTRL_OFFSET);
+      value.sta_after = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+      ret = OK;
+    }
+  leave_critical_section(flags);
+  if (ret == OK) *out = value;
+  return ret;
+}
+
+int stm32_scr_stop_status(struct sdio_dev_s *dev, struct scr_lease_key key)
+{
+  struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags = enter_critical_section();
+  int result = -ESTALE;
+  if (scr_lease_matches(&priv->scrlease, key) &&
+      key.owner == (uintptr_t)nxsched_gettid() && !up_interrupt_context())
+    {
+      /* Observation only. Never grants recovery, copy or reuse. */
+      result = scr_closed(priv) ? -EINPROGRESS : -EBUSY;
+    }
+  leave_critical_section(flags);
+  return result;
+#endif
 }
 
 /****************************************************************************
@@ -924,7 +1445,7 @@ static void stm32_sdiosample(struct stm32_dev_s *priv,
   regs->dctrl   = (uint16_t)sdmmc_getreg32(priv, STM32_SDMMC_DCTRL_OFFSET);
   regs->dtimer  = sdmmc_getreg32(priv, STM32_SDMMC_DTIMER_OFFSET);
   regs->dlen    = sdmmc_getreg32(priv, STM32_SDMMC_DLEN_OFFSET);
-  regs->dcount  = sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET);
+  /* DCNTR is only specified after completion/hold, not arbitrary samples. */
   regs->sta     = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
   regs->mask    = sdmmc_getreg32(priv, STM32_SDMMC_MASK_OFFSET);
 }
@@ -968,8 +1489,7 @@ static void stm32_sdiodump(struct stm32_sdioregs_s *regs, const char *msg)
          regs->dtimer);
   mcinfo("   DLEN[%08x]: %08" PRIx32 "\n", STM32_SDMMC_DLEN_OFFSET,
          regs->dlen);
-  mcinfo(" DCOUNT[%08x]: %08" PRIx32 "\n", STM32_SDMMC_DCOUNT_OFFSET,
-         regs->dcount);
+  mcinfo(" DCOUNT: omitted (sample may be active or failed)\n");
   mcinfo("    STA[%08x]: %08" PRIx32 "\n", STM32_SDMMC_STA_OFFSET,
          regs->sta);
   mcinfo("   MASK[%08x]: %08" PRIx32 "\n", STM32_SDMMC_MASK_OFFSET,
@@ -1232,7 +1752,7 @@ static void stm32_sendfifo(struct stm32_dev_s *priv)
            * padding with zero as necessary to extend to a full word.
            */
 
-          uint8_t *ptr = (uint8_t *)priv->remaining;
+          uint8_t *ptr = (uint8_t *)priv->buffer;
           int i;
 
           data.w = 0;
@@ -1270,6 +1790,7 @@ static void stm32_sendfifo(struct stm32_dev_s *priv)
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
 static void stm32_recvfifo(struct stm32_dev_s *priv)
 {
+  irqstate_t flags;
   union
   {
     uint32_t w;
@@ -1280,10 +1801,22 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
    * data available in the RX FIFO.
    */
 
-  while (priv->remaining > 0 &&
-         (sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
-          STM32_SDMMC_STA_RXFIFOE) == 0)
+  for (; ; )
     {
+      /* The timer and SDMMC interrupts may preempt one another.  Protect
+       * the check and one complete word update, without masking interrupts
+       * for the duration of an arbitrarily large receive request.
+       */
+
+      flags = enter_critical_section();
+      if (priv->remaining == 0 ||
+          (sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
+           STM32_SDMMC_STA_RXFIFOE) != 0)
+        {
+          leave_critical_section(flags);
+          break;
+        }
+
       /* Read the next word from the RX FIFO */
 
       data.w = sdmmc_getreg32(priv, STM32_SDMMC_FIFO_OFFSET);
@@ -1310,6 +1843,8 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
 
           priv->remaining = 0;
         }
+
+      leave_critical_section(flags);
     }
 }
 #endif
@@ -1411,6 +1946,14 @@ static void stm32_eventtimeout(wdparm_t arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  /* A callback already dispatched before cancellation may arrive after
+   * one-shot quarantine/retirement. It must not publish another wakeup.
+   * This is not a hardware-stop or callback-join acknowledgement.
+   */
+  if (scr_closed(priv)) return;
+#endif
+
   /* There is always race conditions with timer expirations. */
 
   DEBUGASSERT((priv->waitevents & SDIOWAIT_TIMEOUT) != 0 ||
@@ -1457,6 +2000,16 @@ static void stm32_eventtimeout(wdparm_t arg)
 static void stm32_endwait(struct stm32_dev_s *priv,
                           sdio_eventset_t wkupevent)
 {
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  if (priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      if (wkupevent == SDIOWAIT_TRANSFERDONE && priv->scr_completed)
+        scr_close_producers(priv);
+      else
+        scr_seal(priv, (wkupevent & SDIOWAIT_TIMEOUT) ? -ETIMEDOUT : -EIO);
+    }
+
+#endif
   /* Cancel the watchdog timeout */
 
   wd_cancel(&priv->waitwdog);
@@ -1493,9 +2046,32 @@ static void stm32_endwait(struct stm32_dev_s *priv,
 static void stm32_endtransfer(struct stm32_dev_s *priv,
                               sdio_eventset_t wkupevent)
 {
+  irqstate_t flags = enter_critical_section();
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+
+  if (priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      /* Preserve hardware terminal evidence; no fabricated stop sequence. */
+      if (wkupevent == SDIOWAIT_TRANSFERDONE && priv->scr_completed)
+        scr_close_producers(priv);
+      else
+        scr_seal(priv, (wkupevent & SDIOWAIT_TIMEOUT) ? -ETIMEDOUT : -EIO);
+      if ((priv->waitevents & wkupevent) != 0)
+        {
+          stm32_endwait(priv, wkupevent);
+        }
+      leave_critical_section(flags);
+      return;
+    }
+#endif
+
   /* Disable all transfer related interrupts */
 
   stm32_configxfrints(priv, 0);
+
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+#endif
 
   /* If there were errors, send a stop command to DPSM */
 
@@ -1522,6 +2098,11 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
 
   priv->remaining = 0;
 
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  priv->receivecnt = 0;
+  priv->buffer = NULL;
+#endif
+
   /* Is a thread wait for these data transfer complete events? */
 
   if ((priv->waitevents & wkupevent) != 0)
@@ -1530,6 +2111,8 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
 
       stm32_endwait(priv, wkupevent);
     }
+
+  leave_critical_section(flags);
 }
 
 /****************************************************************************
@@ -1548,27 +2131,45 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
  ****************************************************************************/
 
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
-static void stm32_sdmmc_fifo_monitor(void *arg)
+static void stm32_sdmmc_fifo_monitor(wdparm_t arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  if (scr_closed(priv)) return;
+#endif
+  irqstate_t flags;
 
-  if (priv->receivecnt && priv->remaining &&
-      priv->remaining < FIFO_SIZE_IN_BYTES / 2)
+  /* Run in timer interrupt context, serialized with the SDMMC interrupt
+   * and transfer setup/termination.  A deferred work item could retain the
+   * caller's buffer after cancel returns, or resume in a later transfer.
+   */
+
+  flags = enter_critical_section();
+
+  if (priv->receivecnt && priv->remaining && priv->buffer != NULL &&
+      priv->xfrmask != 0)
     {
-      /* Manually Receive data from the lame RX FIFO */
+      if (priv->remaining < FIFO_SIZE_IN_BYTES / 2)
+        {
+          /* Less than 32 bytes: at most eight FIFO reads, including the
+           * final fractional word, even if RXFIFOE never becomes set.
+           */
 
-      stm32_recvfifo(priv);
+          stm32_recvfifo(priv);
+        }
+
+      /* Only an unfinished receive may rearm the FIFO monitor. */
+
+      if (priv->remaining &&
+          sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 &&
+          sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) ==
+          STM32_SDMMC_STA_DPSMACT)
+        {
+          wd_start(&priv->fifowdog, 1, stm32_sdmmc_fifo_monitor, arg);
+        }
     }
 
-  /* Check for the lame FIFO condition */
-
-  if (sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 &&
-      sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) ==
-      STM32_SDMMC_STA_DPSMACT)
-    {
-      work_queue(HPWORK, &priv->cbfifo,
-                 stm32_sdmmc_fifo_monitor, arg, 1);
-    }
+  leave_critical_section(flags);
 }
 #endif
 
@@ -1591,14 +2192,18 @@ static void stm32_sdmmc_fifo_monitor(void *arg)
 static int stm32_sdmmc_rdyinterrupt(int irq, void *context, void *arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+  irqstate_t flags;
 
-  /* Avoid noise, check the state */
+  /* A retired ready interrupt must not complete a different kind of wait. */
 
-  if (stm32_gpioread(priv->d0_gpio))
+  flags = enter_critical_section();
+  if ((priv->waitevents & SDIOWAIT_WRCOMPLETE) != 0 &&
+      priv->wkupevent == 0 && stm32_gpioread(priv->d0_gpio))
     {
       stm32_endwait(priv, SDIOWAIT_WRCOMPLETE);
     }
 
+  leave_critical_section(flags);
   return OK;
 }
 #endif
@@ -1620,8 +2225,15 @@ static int stm32_sdmmc_rdyinterrupt(int irq, void *context, void *arg)
 static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  if (scr_closed(priv)) return OK;
+#endif
   uint32_t enabled;
+  uint32_t status;
   uint32_t pending;
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  irqstate_t flags;
+#endif
 #if defined(HAVE_SDMMC_SDIO_MODE)
   uint32_t mask;
 #endif
@@ -1635,7 +2247,7 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
    * bits remaining, then we have work to do here.
    */
 
-  while ((enabled = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
+  while ((enabled = (status = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET)) &
           sdmmc_getreg32(priv, STM32_SDMMC_MASK_OFFSET)) != 0)
     {
       /* Handle in progress, interrupt driven data transfers ****************/
@@ -1643,86 +2255,13 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
       pending  = enabled & priv->xfrmask;
       if (pending != 0)
         {
-#ifndef CONFIG_STM32H7_SDMMC_IDMA
-          /* Is the RX FIFO half full or more?  Is so then we must be
-           * processing a receive transaction.
+          /* Errors take precedence over FIFO service and DATAEND.  Do not
+           * copy invalid receive data or report a successful transfer.
            */
-
-          if ((pending & STM32_SDMMC_STA_RXFIFOHF) != 0)
-            {
-              /* Receive data from the RX FIFO */
-
-              stm32_recvfifo(priv);
-              work_queue(HPWORK, &priv->cbfifo,
-                         stm32_sdmmc_fifo_monitor, arg, 1);
-            }
-
-          /* Otherwise, Is the transmit FIFO half empty or less?  If so
-           * we must be processing a send transaction.  NOTE:  We can't
-           * be processing both!
-           */
-
-          else if ((pending & STM32_SDMMC_STA_TXFIFOHE) != 0)
-            {
-              /* Send data via the TX FIFO */
-
-              stm32_sendfifo(priv);
-
-              /* If we are done shutdown the TXFIFOHE interrupt */
-
-              if (priv->remaining == 0)
-                {
-                  sdmmc_putreg32(priv, ~STM32_SDMMC_MASK_TXFIFOHEIE &
-                                 sdmmc_getreg32(priv,
-                                                STM32_SDMMC_MASK_OFFSET),
-                                 STM32_SDMMC_MASK_OFFSET);
-                }
-            }
-#endif
-
-          /* Handle data end events */
-
-          if ((pending & STM32_SDMMC_STA_DATAEND) != 0)
-            {
-              /* Handle any data remaining the RX FIFO.  If the RX FIFO is
-               * less than half full at the end of the transfer, then no
-               * half-full interrupt will be received.
-               */
-
-#ifndef CONFIG_STM32H7_SDMMC_IDMA
-
-              /* If the transfer would not trigger fifo half full
-               * we used IDMA to manage the lame fifo
-               */
-
-              if (priv->remaining && priv->remaining <
-                  FIFO_SIZE_IN_BYTES / 2)
-                {
-                  memcpy(priv->buffer, priv->rxfifo, priv->remaining);
-                }
-#else
-              if (priv->receivecnt)
-                {
-                  /* Invalidate dcache, and copy the received data into
-                   * client buffers in unaligned case
-                   */
-
-                  stm32_recvdma(priv);
-                }
-              else
-#endif
-                {
-                  /* Then terminate the transfer.
-                   * Sets STM32_SDMMC_ICR_DATAENDC
-                   */
-
-                  stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
-                }
-            }
 
           /* Handle data block send/receive CRC failure */
 
-          else if ((pending & STM32_SDMMC_STA_DCRCFAIL) != 0)
+          if ((pending & STM32_SDMMC_STA_DCRCFAIL) != 0)
             {
               /* Terminate the transfer with an error.
                *  Sets STM32_SDMMC_ICR_DCRCFAILC
@@ -1778,6 +2317,134 @@ static int stm32_sdmmc_interrupt(int irq, void *context, void *arg)
 
               stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE |
                                       SDIOWAIT_ERROR);
+            }
+          else if ((pending & STM32_SDMMC_STA_DATAEND) != 0 &&
+                   (status & (STM32_SDMMC_STA_IDMATE |
+                              STM32_SDMMC_STA_DABORT)) != 0)
+            {
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+#else
+              /* These status flags need not be enabled in MASK.  DATAEND
+               * does not authorize copying a failed or aborted receive.
+               */
+
+#endif
+              stm32_endtransfer(priv,
+                                SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
+            }
+          else
+            {
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+              if (priv->scrlease.state == SCR_LEASE_ACTIVE &&
+                  (pending & STM32_SDMMC_STA_DATAEND) != 0)
+                {
+                  uint32_t errors;
+                  /* Evidence only: no copy, invalidate, clear, or release. */
+                  priv->scr_terminal_sta_before =
+                    sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+                  priv->scr_terminal_idma =
+                    sdmmc_getreg32(priv, STM32_SDMMC_IDMACTRLR_OFFSET);
+                  priv->scr_terminal_sta_after =
+                    sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+                  errors = (priv->scr_terminal_sta_before |
+                            priv->scr_terminal_sta_after) &
+                    (STM32_SDMMC_STA_IDMATE | STM32_SDMMC_STA_DABORT |
+                     STM32_SDMMC_STA_DCRCFAIL | STM32_SDMMC_STA_DTIMEOUT |
+                     STM32_SDMMC_STA_RXOVERR | STM32_SDMMC_STA_TXUNDERR);
+                  priv->scr_completed = errors == 0;
+                  stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE |
+                    (errors ? SDIOWAIT_ERROR : 0));
+                  return OK;
+                }
+#endif
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+              /* Is the RX FIFO half full or more?  Is so then we must be
+               * processing a receive transaction.
+               */
+
+              if ((pending & STM32_SDMMC_STA_RXFIFOHF) != 0)
+                {
+                  /* Receive data from the RX FIFO */
+
+                  stm32_recvfifo(priv);
+                  flags = enter_critical_section();
+                  if (priv->receivecnt && priv->remaining &&
+                      !WDOG_ISACTIVE(&priv->fifowdog))
+                    {
+                      wd_start(&priv->fifowdog, 1, stm32_sdmmc_fifo_monitor,
+                               (wdparm_t)priv);
+                    }
+
+                  leave_critical_section(flags);
+                }
+
+              /* Otherwise, Is the transmit FIFO half empty or less?  If so
+               * we must be processing a send transaction.  NOTE:  We can't
+               * be processing both!
+               */
+
+              else if ((pending & STM32_SDMMC_STA_TXFIFOHE) != 0)
+                {
+                  /* Send data via the TX FIFO */
+
+                  stm32_sendfifo(priv);
+
+                  /* If we are done shutdown the TXFIFOHE interrupt */
+
+                  if (priv->remaining == 0)
+                    {
+                      sdmmc_putreg32(priv, ~STM32_SDMMC_MASK_TXFIFOHEIE &
+                                     sdmmc_getreg32(priv,
+                                                    STM32_SDMMC_MASK_OFFSET),
+                                     STM32_SDMMC_MASK_OFFSET);
+                    }
+                }
+#endif
+
+              /* Handle data end events */
+
+              if ((pending & STM32_SDMMC_STA_DATAEND) != 0)
+                {
+                  /* Handle any data remaining the RX FIFO.  If the RX FIFO is
+                   * less than half full at the end of the transfer, then no
+                   * half-full interrupt will be received.
+                   */
+
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+
+                  flags = enter_critical_section();
+
+                  /* If the transfer would not trigger fifo half full
+                   * we used IDMA to manage the lame fifo
+                   */
+
+                  if (priv->remaining && priv->remaining <
+                      FIFO_SIZE_IN_BYTES / 2)
+                    {
+                      memcpy(priv->buffer, priv->rxfifo, priv->remaining);
+                    }
+
+                  stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
+                  leave_critical_section(flags);
+#else
+                  if (priv->receivecnt)
+                    {
+                      /* Invalidate dcache, and copy the received data into
+                       * client buffers in unaligned case
+                       */
+
+                      stm32_recvdma(priv);
+                    }
+                  else
+                    {
+                      /* Then terminate the transfer.
+                       * Sets STM32_SDMMC_ICR_DATAENDC
+                       */
+
+                      stm32_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
+                    }
+#endif
+                }
             }
         }
 
@@ -1908,6 +2575,19 @@ static void stm32_reset(struct sdio_dev_s *dev)
   /* Disable clocking */
 
   flags = enter_critical_section();
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  if (priv->scrlease.state != SCR_LEASE_IDLE ||
+      (priv->scrinitializing && priv->scrinitowner != (uintptr_t)nxsched_gettid()))
+    {
+      leave_critical_section(flags);
+      return;
+    }
+#endif
+
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+  priv->receivecnt = 0;
+#endif
 
 #if defined(CONFIG_STM32H7_SDMMC1)
   if (priv->base == STM32_SDMMC1_BASE)
@@ -2045,7 +2725,20 @@ static sdio_statset_t stm32_status(struct sdio_dev_s *dev)
 static void stm32_widebus(struct sdio_dev_s *dev, bool wide)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || priv->scrlease.state == SCR_LEASE_ACTIVE)
+    {
+      leave_critical_section(scrflags);
+      return ;
+    }
+
+#endif
   priv->widebus = wide;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+
+  leave_critical_section(scrflags);
+#endif
 }
 
 /****************************************************************************
@@ -2066,6 +2759,15 @@ static void stm32_widebus(struct sdio_dev_s *dev, bool wide)
 static void stm32_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || priv->scrlease.state == SCR_LEASE_ACTIVE)
+    {
+      leave_critical_section(scrflags);
+      return ;
+    }
+
+#endif
   uint32_t clckr;
 
   switch (rate)
@@ -2108,6 +2810,10 @@ static void stm32_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
   /* Set the new clock frequency along with the clock enable/disable bit */
 
   stm32_setclkcr(priv, clckr);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+
+  leave_critical_section(scrflags);
+#endif
 }
 
 /****************************************************************************
@@ -2128,6 +2834,14 @@ static int stm32_attach(struct sdio_dev_s *dev)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
   int ret;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+#endif
 
   /* Attach the SDIO interrupt handler */
 
@@ -2148,6 +2862,9 @@ static int stm32_attach(struct sdio_dev_s *dev)
       up_enable_irq(priv->nirq);
     }
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  leave_critical_section(scrflags);
+#endif
   return ret;
 }
 
@@ -2171,6 +2888,57 @@ static int stm32_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
                          uint32_t arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  /* Fixed-card SD identification only while no receive lease is active.
+   * Compare complete command encodings, not just command indices.
+   */
+  if (priv->scrlease.state == SCR_LEASE_IDLE &&
+      cmd != MMCSD_CMD0 && cmd != MMCSD_CMD2 && cmd != SD_CMD3 &&
+      cmd != MMCSD_CMD7S && cmd != SD_CMD8 && cmd != MMCSD_CMD9 &&
+      cmd != MMCSD_CMD13 && cmd != SD_CMD55 && cmd != SD_ACMD41)
+    {
+      leave_critical_section(scrflags);
+      return -ENOTSUP;
+    }
+#endif
+  if (scr_denied(priv))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+  if (priv->scrlease.state == SCR_LEASE_ACTIVE)
+    {
+      unsigned index = (cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      if (priv->sector_mode)
+        {
+          if (priv->scr_completed || priv->scr_phase != 0 ||
+              !priv->scr_rx_setup || cmd != MMCSD_CMD17 ||
+              arg != priv->sector_argument)
+            { leave_critical_section(scrflags); return -EBUSY; }
+          priv->scr_phase = 1;
+        }
+      else
+#endif
+        {
+      if (priv->scr_completed ||
+          !((cmd == MMCSD_CMD16 && arg == 8 && priv->scr_phase == 0) ||
+            (cmd == SD_CMD55 && (arg & 0xffff) == 0 && arg != 0 &&
+             priv->scr_phase == 0) ||
+            (cmd == SD_ACMD51 && arg == 0 && priv->scr_phase == 2)))
+        {
+          leave_critical_section(scrflags);
+          return -EBUSY;
+        }
+      if (index == 55) priv->scr_phase = 1;
+      if (index == 51) priv->scr_phase = 3;
+        }
+    }
+
+#endif
   uint32_t regval;
   uint32_t cmdidx;
 
@@ -2256,7 +3024,11 @@ static int stm32_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
   /* Write the SDIO CMD */
 
   sdmmc_putreg32(priv, regval, STM32_SDMMC_CMD_OFFSET);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return OK; } while (0);
+#else
   return OK;
+#endif
 }
 
 /****************************************************************************
@@ -2279,8 +3051,21 @@ static void stm32_blocksetup(struct sdio_dev_s *dev,
                              unsigned int blocksize, unsigned int nblocks)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || (priv->scrlease.state == SCR_LEASE_ACTIVE && (priv->scr_phase != 0 || priv->scr_completed || blocksize != scr_receive_size(priv) || nblocks != 1)))
+    {
+      leave_critical_section(scrflags);
+      return ;
+    }
+
+#endif
 
   priv->blocksize = blocksize;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+
+  leave_critical_section(scrflags);
+#endif
 }
 
 /****************************************************************************
@@ -2310,9 +3095,34 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
                            size_t nbytes)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  /* Boot-time diagnostic restriction, not a recovery or DMA-stop method. */
+  if (priv->scrlease.state != SCR_LEASE_ACTIVE || priv->scr_rx_setup)
+    {
+      leave_critical_section(scrflags);
+      return -ENOTSUP;
+    }
+#endif
+  if (scr_denied(priv) || (priv->scrlease.state == SCR_LEASE_ACTIVE && (priv->scr_completed || buffer != priv->scrlease.arena || nbytes != scr_receive_size(priv))))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  priv->scr_rx_setup = true;
+#endif
+
+  irqstate_t flags;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+
+  flags = enter_critical_section();
+  wd_cancel(&priv->fifowdog);
 
   /* Reset the DPSM configuration */
 
@@ -2341,7 +3151,12 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
     {
       /* Use the driver's buffer */
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+      sdmmc_putreg32(priv, (uintptr_t)(priv->scrlease.state == SCR_LEASE_ACTIVE ?
+                                     priv->scrlease.arena : priv->rxfifo),
+#else
       sdmmc_putreg32(priv, (uintptr_t)priv->rxfifo,
+#endif
                      STM32_SDMMC_IDMABASE0R_OFFSET);
 
       sdmmc_putreg32(priv, STM32_SDMMC_IDMACTRLR_IDMAEN,
@@ -2358,7 +3173,12 @@ static int stm32_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
   stm32_configxfrints(priv, STM32_SDMMC_RECV_MASK);
   stm32_sample(priv, SAMPLENDX_AFTER_SETUP);
 
+  leave_critical_section(flags);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return OK; } while (0);
+#else
   return OK;
+#endif
 }
 #endif
 
@@ -2386,9 +3206,22 @@ static int stm32_sendsetup(struct sdio_dev_s *dev, const
                            uint8_t *buffer, size_t nbytes)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
+  irqstate_t flags;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+
+  flags = enter_critical_section();
+  wd_cancel(&priv->fifowdog);
 
   /* Reset the DPSM configuration */
 
@@ -2413,7 +3246,12 @@ static int stm32_sendsetup(struct sdio_dev_s *dev, const
 
   stm32_configxfrints(priv, STM32_SDMMC_SEND_MASK);
   stm32_sample(priv, SAMPLENDX_AFTER_SETUP);
+  leave_critical_section(flags);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return OK; } while (0);
+#else
   return OK;
+#endif
 }
 #endif
 
@@ -2437,6 +3275,23 @@ static int stm32_sendsetup(struct sdio_dev_s *dev, const
 static int stm32_cancel(struct sdio_dev_s *dev)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  irqstate_t flags;
+
+  flags = enter_critical_section();
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  if (priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      /* Caller memory is detached; physical DMA/IRQ stop is NOT proved. */
+      scr_seal(priv, -ECANCELED);
+      wd_cancel(&priv->waitwdog);
+      if (priv->waitevents != 0)
+        {
+          stm32_endwait(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
+        }
+      leave_critical_section(flags);
+      return -EINPROGRESS;
+    }
+#endif
 
   /* Disable all transfer- and event- related interrupts */
 
@@ -2462,9 +3317,16 @@ static int stm32_cancel(struct sdio_dev_s *dev)
 
   wd_cancel(&priv->waitwdog);
 
+#ifndef CONFIG_STM32H7_SDMMC_IDMA
+  wd_cancel(&priv->fifowdog);
+  priv->receivecnt = 0;
+  priv->buffer = NULL;
+#endif
+
   /* Mark no transfer in progress */
 
   priv->remaining = 0;
+  leave_critical_section(flags);
   return OK;
 }
 
@@ -2488,6 +3350,12 @@ static int stm32_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
   int32_t timeout;
   uint32_t events;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  bool denied = scr_denied(priv);
+  leave_critical_section(scrflags);
+  if (denied) return -EBUSY;
+#endif
 
   switch (cmd & MMCSD_RESPONSE_MASK)
     {
@@ -2520,6 +3388,12 @@ static int stm32_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
 
   while ((sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) & events) == 0)
     {
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+      scrflags = enter_critical_section();
+      denied = scr_denied(priv);
+      leave_critical_section(scrflags);
+      if (denied) return -EBUSY;
+#endif
       if (--timeout <= 0)
         {
           mcerr("ERROR: Timeout cmd: %08" PRIx32 " events: %08" PRIx32
@@ -2530,7 +3404,27 @@ static int stm32_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
         }
     }
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  scrflags = enter_critical_section();
+  if (scr_denied(priv))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+  if (priv->scrlease.state == SCR_LEASE_ACTIVE)
+    {
+      uint32_t response = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
+      int response_result = (response & STM32_SDMMC_STA_CTIMEOUT) ?
+        -ETIMEDOUT : (response & STM32_SDMMC_STA_CCRCFAIL) ? -EIO : OK;
+      /* Preserve response evidence for the owner's R1 collection. */
+      leave_critical_section(scrflags);
+      return response_result;
+    }
+#endif
   sdmmc_putreg32(priv, events, STM32_SDMMC_ICR_OFFSET);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  leave_critical_section(scrflags);
+#endif
   return OK;
 }
 
@@ -2560,6 +3454,15 @@ static int stm32_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
                               uint32_t *rshort)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
 #if defined(CONFIG_DEBUG_FEATURES)
   uint32_t respcmd;
 #endif
@@ -2645,13 +3548,48 @@ static int stm32_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
   sdmmc_putreg32(priv, STM32_SDMMC_RESPDONE_ICR | STM32_SDMMC_CMDDONE_ICR,
                  STM32_SDMMC_ICR_OFFSET);
   *rshort = sdmmc_getreg32(priv, STM32_SDMMC_RESP1_OFFSET);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  if (ret == OK && priv->scrlease.state == SCR_LEASE_ACTIVE)
+    {
+      unsigned index = (cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT;
+      unsigned received = sdmmc_getreg32(priv, STM32_SDMMC_RESPCMD_OFFSET) &
+                          STM32_SDMMC_RESPCMD_MASK;
+      if (index != received) ret = -EIO;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      else if (priv->sector_mode)
+        {
+          if (cmd != MMCSD_CMD17 || priv->scr_phase != 1 ||
+              (*rshort & SECTOR_R1_ERRORMASK) != 0) ret = -EIO;
+          else priv->scr_phase = 2;
+        }
+#endif
+      else if (index == 55 && priv->scr_phase == 1) priv->scr_phase = 2;
+      else if (index == 51 && priv->scr_phase == 3) priv->scr_phase = 4;
+      else if (cmd != MMCSD_CMD16 || priv->scr_phase != 0) ret = -EIO;
+    }
+
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if (priv->sector_mode && ret < 0) scr_seal(priv, ret);
+#endif
+do { leave_critical_section(scrflags); return ret; } while (0);
+#else
   return ret;
+#endif
 }
 
 static int stm32_recvlong(struct sdio_dev_s *dev, uint32_t cmd,
                           uint32_t rlong[4])
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
   uint32_t regval;
   int ret = OK;
 
@@ -2701,14 +3639,27 @@ static int stm32_recvlong(struct sdio_dev_s *dev, uint32_t cmd,
       rlong[2] = sdmmc_getreg32(priv, STM32_SDMMC_RESP3_OFFSET);
       rlong[3] = sdmmc_getreg32(priv, STM32_SDMMC_RESP4_OFFSET);
     }
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return ret; } while (0);
+#else
 
   return ret;
+#endif
 }
 
 static int stm32_recvshort(struct sdio_dev_s *dev, uint32_t cmd,
                            uint32_t *rshort)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
   uint32_t regval;
   int ret = OK;
 
@@ -2752,8 +3703,12 @@ static int stm32_recvshort(struct sdio_dev_s *dev, uint32_t cmd,
     {
       *rshort = sdmmc_getreg32(priv, STM32_SDMMC_RESP1_OFFSET);
     }
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return ret; } while (0);
+#else
 
   return ret;
+#endif
 }
 
 /****************************************************************************
@@ -2784,6 +3739,15 @@ static void stm32_waitenable(struct sdio_dev_s *dev,
                              sdio_eventset_t eventset, uint32_t timeout)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || (priv->scrlease.state == SCR_LEASE_ACTIVE && (priv->scr_phase != 0 || priv->scr_completed)))
+    {
+      leave_critical_section(scrflags);
+      return ;
+    }
+
+#endif
   uint32_t waitmask = 0;
 
   DEBUGASSERT(priv != NULL);
@@ -2844,8 +3808,30 @@ static void stm32_waitenable(struct sdio_dev_s *dev,
 
       if (!timeout)
         {
-          priv->wkupevent = SDIOWAIT_TIMEOUT;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+          scr_seal(priv, -ETIMEDOUT);
+#endif
+          irqstate_t terminalflags = enter_critical_section();
+
+          /* A concurrent terminal event may already have posted the waiter. */
+
+          if (priv->wkupevent == 0 &&
+              (priv->waitevents & SDIOWAIT_TIMEOUT) != 0)
+            {
+              sdio_eventset_t terminal = SDIOWAIT_TIMEOUT;
+
+#ifdef CONFIG_MMCSD_SDIOWAIT_WRCOMPLETE
+              terminal |= priv->waitevents & SDIOWAIT_WRCOMPLETE;
+#endif
+              stm32_endwait(priv, terminal);
+            }
+
+          leave_critical_section(terminalflags);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return ; } while (0);
+#else
           return;
+#endif
         }
 
       /* Start the watchdog timer */
@@ -2855,9 +3841,17 @@ static void stm32_waitenable(struct sdio_dev_s *dev,
                        stm32_eventtimeout, (wdparm_t)priv);
       if (ret < OK)
         {
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+          scr_seal(priv, ret);
+          stm32_endwait(priv, SDIOWAIT_ERROR);
+#endif
           mcerr("ERROR: wd_start failed: %d\n", ret);
         }
     }
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+
+  leave_critical_section(scrflags);
+#endif
 }
 
 /****************************************************************************
@@ -2894,6 +3888,12 @@ static sdio_eventset_t stm32_eventwait(struct sdio_dev_s *dev)
    */
 
   flags = enter_critical_section();
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if (priv->scrlease.state == SCR_LEASE_HANDOFF ||
+      (priv->scrlease.state == SCR_LEASE_ACTIVE &&
+       priv->scrlease.owner != (uintptr_t)nxsched_gettid()))
+    { leave_critical_section(flags); return SDIOWAIT_ERROR; }
+#endif
 
 #if defined(CONFIG_MMCSD_SDIOWAIT_WRCOMPLETE)
   /* A call to stm32_waitenable that finds the card ready or
@@ -3002,6 +4002,10 @@ errout_with_waitints:
 static void stm32_callbackenable(struct sdio_dev_s *dev,
                                  sdio_eventset_t eventset)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  return ; /* No external callback producers in this diagnostic. */
+#endif
+
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   mcinfo("eventset: %02" PRIx8 "\n", eventset);
@@ -3036,6 +4040,10 @@ static void stm32_callbackenable(struct sdio_dev_s *dev,
 static int stm32_registercallback(struct sdio_dev_s *dev,
                                   worker_t callback, void *arg)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  return -ENOTSUP; /* No external callback producers in this diagnostic. */
+#endif
+
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   /* Disable callbacks and register this callback and is argument */
@@ -3139,6 +4147,27 @@ static int stm32_dmarecvsetup(struct sdio_dev_s *dev,
                               uint8_t *buffer, size_t buflen)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  /* Boot-time diagnostic restriction, not a recovery or DMA-stop method. */
+  if (priv->scrlease.state != SCR_LEASE_ACTIVE || priv->scr_rx_setup)
+    {
+      leave_critical_section(scrflags);
+      return -ENOTSUP;
+    }
+#endif
+  if (scr_denied(priv) || (priv->scrlease.state == SCR_LEASE_ACTIVE && (priv->scr_completed || buffer != priv->scrlease.arena || buflen != scr_receive_size(priv))))
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  priv->scr_rx_setup = true;
+#endif
+
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
 #if defined(CONFIG_ARCH_HAVE_SDIO_PREFLIGHT)
@@ -3216,7 +4245,11 @@ static int stm32_dmarecvsetup(struct sdio_dev_s *dev,
   stm32_configxfrints(priv, STM32_SDMMC_DMARECV_MASK);
 
   stm32_sample(priv, SAMPLENDX_AFTER_SETUP);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return OK; } while (0);
+#else
   return OK;
+#endif
 }
 #endif
 
@@ -3243,7 +4276,21 @@ static int stm32_dmarecvsetup(struct sdio_dev_s *dev,
 static int stm32_dmasendsetup(struct sdio_dev_s *dev,
                               const uint8_t *buffer, size_t buflen)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  /* This fixed-card diagnostic never submits a transmit data phase. */
+  return -ENOTSUP;
+#endif
+
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t scrflags = enter_critical_section();
+  if (scr_denied(priv) || priv->scrlease.state != SCR_LEASE_IDLE)
+    {
+      leave_critical_section(scrflags);
+      return -EBUSY;
+    }
+
+#endif
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
 #if defined(CONFIG_ARCH_HAVE_SDIO_PREFLIGHT)
@@ -3294,7 +4341,11 @@ static int stm32_dmasendsetup(struct sdio_dev_s *dev,
 
   stm32_configxfrints(priv, STM32_SDMMC_DMASEND_MASK);
   stm32_sample(priv, SAMPLENDX_AFTER_SETUP);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+do { leave_critical_section(scrflags); return OK; } while (0);
+#else
   return OK;
+#endif
 }
 #endif
 
@@ -3313,6 +4364,10 @@ static int stm32_dmasendsetup(struct sdio_dev_s *dev,
 
 static void stm32_callback(void *arg)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  return ; /* No external callback producers in this diagnostic. */
+#endif
+
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
 
   /* Is a callback registered? */
@@ -3429,6 +4484,18 @@ struct sdio_dev_s *sdio_initialize(int slotno)
       /* Select SDMMC 1 */
 
       priv = &g_sdmmcdev1;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+      irqstate_t initflags = enter_critical_section();
+      if (up_interrupt_context() || priv->scrlease.state != SCR_LEASE_IDLE ||
+          priv->scrinitializing)
+        {
+          leave_critical_section(initflags);
+          return NULL;
+        }
+      priv->scrinitializing = true;
+      priv->scrinitowner = (uintptr_t)nxsched_gettid();
+      leave_critical_section(initflags);
+#endif
 
 #if defined(CONFIG_SDMMC1_WIDTH_D1_ONLY)
       priv->onebit = true;
@@ -3462,6 +4529,18 @@ struct sdio_dev_s *sdio_initialize(int slotno)
       /* Select SDMMC 2 */
 
       priv = &g_sdmmcdev2;
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+      irqstate_t initflags = enter_critical_section();
+      if (up_interrupt_context() || priv->scrlease.state != SCR_LEASE_IDLE ||
+          priv->scrinitializing)
+        {
+          leave_critical_section(initflags);
+          return NULL;
+        }
+      priv->scrinitializing = true;
+      priv->scrinitowner = (uintptr_t)nxsched_gettid();
+      leave_critical_section(initflags);
+#endif
 
 #  if defined(CONFIG_SDMMC2_WIDTH_D1_ONLY)
       priv->onebit = true;
@@ -3499,6 +4578,12 @@ struct sdio_dev_s *sdio_initialize(int slotno)
    */
 
   stm32_reset(&priv->dev);
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  irqstate_t initflags = enter_critical_section();
+  priv->scrinitializing = false;
+  priv->scrinitowner = 0;
+  leave_critical_section(initflags);
+#endif
   return &priv->dev;
 }
 
@@ -3530,6 +4615,22 @@ void sdio_mediachange(struct sdio_dev_s *dev, bool cardinslot)
   /* Update card status */
 
   flags = enter_critical_section();
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if ((priv->scrlease.state != SCR_LEASE_IDLE || !cardinslot || (priv->cdstatus & SDIO_STATUS_PRESENT) != 0))
+    {
+      if (priv->scrlease.state == SCR_LEASE_IDLE)
+        {
+          priv->scrlease.state = SCR_LEASE_RETIRED;
+          priv->scrlease.result = -ENODEV;
+          scr_close_producers(priv);
+        }
+      else scr_seal(priv, -ENODEV);
+      if (priv->waitevents != 0) stm32_endwait(priv, SDIOWAIT_ERROR);
+      leave_critical_section(flags);
+      return;
+    }
+#endif
+
   cdstatus = priv->cdstatus;
   if (cardinslot)
     {
@@ -3577,6 +4678,22 @@ void sdio_wrprotect(struct sdio_dev_s *dev, bool wrprotect)
   /* Update card status */
 
   flags = enter_critical_section();
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if (true)
+    {
+      if (priv->scrlease.state == SCR_LEASE_IDLE)
+        {
+          priv->scrlease.state = SCR_LEASE_RETIRED;
+          priv->scrlease.result = -ENODEV;
+          scr_close_producers(priv);
+        }
+      else scr_seal(priv, -ENODEV);
+      if (priv->waitevents != 0) stm32_endwait(priv, SDIOWAIT_ERROR);
+      leave_critical_section(flags);
+      return;
+    }
+#endif
+
   if (wrprotect)
     {
       priv->cdstatus |= SDIO_STATUS_WRPROTECTED;
@@ -3610,6 +4727,10 @@ void sdio_wrprotect(struct sdio_dev_s *dev, bool wrprotect)
 void sdio_set_sdio_card_isr(struct sdio_dev_s *dev,
                             int (*func)(void *), void *arg)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  return ; /* No external callback producers in this diagnostic. */
+#endif
+
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 
   priv->do_sdio_card = func;
@@ -3630,3 +4751,4 @@ void sdio_set_sdio_card_isr(struct sdio_dev_s *dev,
 #endif
 
 #endif /* CONFIG_STM32H7_SDMMC1 || CONFIG_STM32H7_SDMMC2 */
+

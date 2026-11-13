@@ -268,6 +268,17 @@ int stm32_gpiosetevent(uint32_t pinset, bool risingedge, bool fallingedge,
   int      nshared;
   int      i;
 
+  unsigned int port = (pinset & GPIO_PORT_MASK) >> GPIO_PORT_SHIFT;
+
+  /* Reject unsupported ports before publishing callbacks or changing IRQs.
+   * These are also the preconditions checked by stm32_configgpio().
+   */
+
+  if (port >= STM32H7_NGPIO || g_gpiobase[port] == 0)
+    {
+      return -EINVAL;
+    }
+
   /* Select the interrupt handler for this EXTI pin */
 
   if (pin < 5)

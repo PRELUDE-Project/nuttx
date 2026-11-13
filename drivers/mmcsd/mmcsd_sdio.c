@@ -25,6 +25,13 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+#include <nuttx/irq.h>
+#include <nuttx/mmcsd_scrdiag.h>
+#endif
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+#  include <nuttx/scr_lease_review.h>
+#endif
 
 #if defined (CONFIG_MMCSD) && defined (CONFIG_MMCSD_SDIO)
 
@@ -490,11 +497,15 @@ static int mmcsd_recv_r6(FAR struct mmcsd_state_s *priv, uint32_t cmd)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+static int mmcsd_get_scr_data(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
+#else
 static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
+#endif
 {
   int ret;
 #ifdef CONFIG_SDIO_DMA
-  bool drop = false;
+  bool drop = (priv->caps & SDIO_CAPS_DMASUPPORTED) == 0;
 #endif
 
 #if defined(CONFIG_SDIO_DMA) && defined(CONFIG_ARCH_HAVE_SDIO_PREFLIGHT)
@@ -539,7 +550,12 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
   if (drop)
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, (FAR uint8_t *)scr, 8);
+      ret = SDIO_RECVSETUP(priv->dev, (FAR uint8_t *)scr, 8);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP for SCR failed: %d\n", ret);
+          return ret;
+        }
     }
 
   SDIO_WAITENABLE(priv->dev,
@@ -548,7 +564,19 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 
   /* Send CMD55 APP_CMD with argument as card's RCA */
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+  if (ret != OK)
+    {
+      ferr("ERROR: Send/poll SD_CMD55 failed: %d\n", ret);
+      SDIO_CANCEL(priv->dev);
+      return ret;
+    }
+
+#else
   mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+#endif
+
   ret = mmcsd_recv_r1(priv, SD_CMD55);
   if (ret != OK)
     {
@@ -559,7 +587,19 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 
   /* Send ACMD51 SD_APP_SEND_SCR with argument as 0 to start data receipt */
 
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, SD_ACMD51, 0);
+  if (ret != OK)
+    {
+      ferr("ERROR: Send/poll SD_ACMD51 failed: %d\n", ret);
+      SDIO_CANCEL(priv->dev);
+      return ret;
+    }
+
+#else
   mmcsd_sendcmdpoll(priv, SD_ACMD51, 0);
+#endif
+
   ret = mmcsd_recv_r1(priv, SD_ACMD51);
   if (ret != OK)
     {
@@ -578,6 +618,48 @@ static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
 
   return ret;
 }
+#ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
+static int mmcsd_get_scr(FAR struct mmcsd_state_s *priv, uint32_t scr[2])
+{
+  struct scr_lease_key key;
+  uint8_t *arena;
+  int ret;
+  /* Caller pointer is used only by task-side qualified final copy. */
+  ret = stm32_scr_claim(priv->dev, &arena, &key);
+  if (ret != OK) return ret;
+  ret = mmcsd_get_scr_data(priv, (uint32_t *)arena);
+#ifdef CONFIG_DEBUG_FS_ERROR
+  /* Trusted stack storage; capture before finish revokes the lease. */
+  struct scr_hw_snapshot observation;
+  int observed = stm32_scr_snapshot(priv->dev, key, &observation);
+#endif
+  ret = stm32_scr_finish(priv->dev, key, ret, scr);
+#ifdef CONFIG_DEBUG_FS_ERROR
+  if (observed == OK)
+    {
+      ferr("SCR pre-finish observation v%lu gen=%" PRIu64 ": state=%lu "
+           "STA=%08lx/%08lx MASK=%08lx "
+           "IDMA=%08lx DLEN=%lu DCTRL=%08lx; not stop proof\n",
+           (unsigned long)observation.version, observation.generation,
+           (unsigned long)observation.state,
+           (unsigned long)observation.sta_before,
+           (unsigned long)observation.sta_after,
+           (unsigned long)observation.mask,
+           (unsigned long)observation.idmactrl,
+           (unsigned long)observation.dlen,
+           (unsigned long)observation.dctrl);
+    }
+  else
+    {
+      ferr("SCR observation unavailable: %d\n", observed);
+    }
+#endif
+  ferr("SCR review: result=%d, stop_status=%d (diagnostic only)\n",
+       ret, stm32_scr_stop_status(priv->dev, key));
+  return ret;
+}
+
+#endif
 
 /****************************************************************************
  * Name: mmcsd_decode_csd
@@ -1175,7 +1257,11 @@ static int mmcsd_get_r1(FAR struct mmcsd_state_s *priv, FAR uint32_t *r1)
    * R1 card status register.
    */
 
-  mmcsd_sendcmdpoll(priv, MMCSD_CMD13, (uint32_t)priv->rca << 16);
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD13, (uint32_t)priv->rca << 16);
+  if (ret != OK)
+    {
+      return ret;
+    }
   ret = SDIO_RECVR1(priv->dev, MMCSD_CMD13, &local_r1);
   if (ret == OK)
     {
@@ -1261,7 +1347,15 @@ static bool mmcsd_wrprotected(FAR struct mmcsd_state_s *priv)
    * SDIO driver via SDIO_WRPROTECTED)
    */
 
+#ifdef CONFIG_MMCSD_READONLY
+  /* Configuration-enforced read-only applies even when the card and socket
+   * report writable media. All SDIO block-write paths use this predicate.
+   */
+
+  return true;
+#else
   return (priv->wrprotect || priv->locked || SDIO_WRPROTECTED(priv->dev));
+#endif
 }
 
 /****************************************************************************
@@ -1294,6 +1388,18 @@ static int mmcsd_eventwait(FAR struct mmcsd_state_s *priv,
       ferr("ERROR: Awakened with %02x\n", wkupevent);
       return wkupevent & SDIOWAIT_TIMEOUT ? -ETIMEDOUT : -EIO;
     }
+
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  /* This diagnostic waits only for SCR or sector receive completion.
+   * No-error is not sufficient when the expected completion is absent.
+   * Keep ordinary write-ready zero-event semantics unchanged.
+   */
+
+  if ((wkupevent & SDIOWAIT_TRANSFERDONE) == 0)
+    {
+      return -EIO;
+    }
+#endif
 
   /* Since there are no failure events, we must have been awakened by one
    * (or more) success events.
@@ -1434,7 +1540,12 @@ static int mmcsd_stoptransmission(FAR struct mmcsd_state_s *priv)
 
   /* Send CMD12, STOP_TRANSMISSION, and verify good R1 return status  */
 
-  mmcsd_sendcmdpoll(priv, MMCSD_CMD12, 0);
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD12, 0);
+  if (ret != OK)
+    {
+      return ret;
+    }
+
   ret = mmcsd_recv_r1(priv, MMCSD_CMD12);
   if (ret != OK)
     {
@@ -1467,7 +1578,12 @@ static int mmcsd_setblocklen(FAR struct mmcsd_state_s *priv,
        * block length is specified in the CSD.
        */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD16, blocklen);
+      if (ret != OK) return ret;
+#else
       mmcsd_sendcmdpoll(priv, MMCSD_CMD16, blocklen);
+#endif
       ret = mmcsd_recv_r1(priv, MMCSD_CMD16);
       if (ret == OK)
         {
@@ -1623,7 +1739,13 @@ static ssize_t mmcsd_readsingle(FAR struct mmcsd_part_s *part,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      ret = SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
   /* Send CMD17, READ_SINGLE_BLOCK: Read a block of the size selected
@@ -1775,7 +1897,13 @@ static ssize_t mmcsd_readmultiple(FAR struct mmcsd_part_s *part,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, buffer, nbytes);
+      ret = SDIO_RECVSETUP(priv->dev, buffer, nbytes);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
 #ifdef CONFIG_MMCSD_MMCSUPPORT
@@ -1822,6 +1950,7 @@ static ssize_t mmcsd_readmultiple(FAR struct mmcsd_part_s *part,
       if (ret != OK)
         {
           ferr("ERROR: mmcsd_stoptransmission failed: %d\n", ret);
+          return ret;
         }
     }
 
@@ -1936,7 +2065,13 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_part_s *part,
     {
       /* Send CMD24, WRITE_BLOCK, and verify good R1 status is returned */
 
-      mmcsd_sendcmdpoll(priv, MMCSD_CMD24, offset);
+      ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD24, offset);
+      if (ret < 0)
+        {
+          /* No transfer buffer or data wait has been armed on this path. */
+          return ret;
+        }
+
       ret = mmcsd_recv_r1(priv, MMCSD_CMD24);
       if (ret != OK)
         {
@@ -2126,7 +2261,11 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_part_s *part,
     {
       /* Send CMD55, APP_CMD, a verify that good R1 status is returned */
 
-      mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+      ret = mmcsd_sendcmdpoll(priv, SD_CMD55, (uint32_t)priv->rca << 16);
+      if (ret != OK)
+        {
+          return ret;
+        }
       ret = mmcsd_recv_r1(priv, SD_CMD55);
       if (ret != OK)
         {
@@ -2138,7 +2277,11 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_part_s *part,
        * is returned.
        */
 
-      mmcsd_sendcmdpoll(priv, SD_ACMD23, nblocks);
+      ret = mmcsd_sendcmdpoll(priv, SD_ACMD23, nblocks);
+      if (ret != OK)
+        {
+          return ret;
+        }
       ret = mmcsd_recv_r1(priv, SD_ACMD23);
       if (ret != OK)
         {
@@ -2184,7 +2327,11 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_part_s *part,
        * is returned
        */
 
-      mmcsd_sendcmdpoll(priv, MMCSD_CMD25, offset);
+      ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD25, offset);
+      if (ret != OK)
+        {
+          return ret;
+        }
       ret = mmcsd_recv_r1(priv, MMCSD_CMD25);
       if (ret != OK)
         {
@@ -3244,7 +3391,13 @@ static int mmcsd_read_extcsd(FAR struct mmcsd_state_s *priv,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, extcsd, 512);
+      ret = SDIO_RECVSETUP(priv->dev, extcsd, 512);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
   /* Send CMD8 in data-transfer mode to obtain the
@@ -3509,7 +3662,13 @@ static int mmcsd_general_cmd_read(FAR struct mmcsd_state_s *priv,
   else
 #endif
     {
-      SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      ret = SDIO_RECVSETUP(priv->dev, buffer, priv->blocksize);
+      if (ret != OK)
+        {
+          ferr("ERROR: SDIO_RECVSETUP failed: %d\n", ret);
+          SDIO_CANCEL(priv->dev);
+          return ret;
+        }
     }
 
   /* Send CMD56: Read a sector size data and verify that good R1
@@ -3561,7 +3720,7 @@ static int mmcsd_iocmd(FAR struct mmcsd_part_s *part,
     {
     case MMCSD_CMDIDX0: /* Reset card to idle state */
       {
-        mmcsd_sendcmdpoll(priv, MMCSD_CMD0, ic_ptr->arg);
+        ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD0, ic_ptr->arg);
         MMCSD_USLEEP(MMCSD_IDLE_DELAY);
       }
       break;
@@ -3749,7 +3908,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * identification state/card-identification mode
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD2, 0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD2, 0);
+#endif
   ret = SDIO_RECVR2(priv->dev, MMCSD_CMD2, cid);
   if (ret != OK)
     {
@@ -3767,7 +3931,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * Send CMD3 with argument 0, SD card publishes its RCA in the response.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, SD_CMD3, 0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, SD_CMD3, 0);
+#endif
   ret = mmcsd_recv_r6(priv, SD_CMD3);
   if (ret != OK)
     {
@@ -3798,7 +3967,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * mode.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD9, (uint32_t)priv->rca << 16);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD9, (uint32_t)priv->rca << 16);
+#endif
   ret = SDIO_RECVR2(priv->dev, MMCSD_CMD9, priv->csd);
   if (ret != OK)
     {
@@ -3813,7 +3987,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * card selected all of the time.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD7S, (uint32_t)priv->rca << 16);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD7S, (uint32_t)priv->rca << 16);
+#endif
   ret = mmcsd_recv_r1(priv, MMCSD_CMD7S);
   if (ret != OK)
     {
@@ -3863,6 +4042,9 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
     }
 
   mmcsd_decode_scr(priv, scr);
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  return OK; /* diagnostic ends at SCR, no later bus-width switch */
+#endif
 
   if ((priv->caps & SDIO_CAPS_4BIT) != 0)
     {
@@ -3927,7 +4109,12 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
    * for pre-idle. No effect for SD.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0xf0f0f0f0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0xf0f0f0f0);
+#endif
   MMCSD_USLEEP(MMCSD_IDLE_DELAY);
 
   /* After power up at least 74 clock cycles are required prior to starting
@@ -3938,7 +4125,12 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
 
   /* Then send CMD0 just once is standard procedure */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0);
+#endif
   MMCSD_USLEEP(MMCSD_IDLE_DELAY);
 
 #ifdef CONFIG_MMCSD_MMCSUPPORT
@@ -4030,6 +4222,13 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
           ret = SDIO_RECVR7(priv->dev, SD_CMD8, &response);
         }
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      /* The fixed-sector diagnostic requires SD v2; do not mask a failed
+       * interface-condition exchange by falling back to SD v1 probing.
+       */
+      if (ret != OK) return ret;
+#endif
+
       /* Were both the command sent and response received correctly? */
 
       if (ret == OK)
@@ -4074,7 +4273,12 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
         {
           /* Send CMD55 with argument = 0 */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+          ret = mmcsd_sendcmdpoll(priv, SD_CMD55, 0);
+          if (ret != OK) return ret;
+#else
           mmcsd_sendcmdpoll(priv, SD_CMD55, 0);
+#endif
           ret = mmcsd_recv_r1(priv, SD_CMD55);
           if (ret != OK)
             {
@@ -4090,9 +4294,16 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
             {
               /* Send ACMD41 */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+              ret = mmcsd_sendcmdpoll(priv, SD_ACMD41,
+                                MMCSD_ACMD41_VOLTAGEWINDOW_33_32 |
+                                sdcapacity);
+              if (ret != OK) return ret;
+#else
               mmcsd_sendcmdpoll(priv, SD_ACMD41,
                                 MMCSD_ACMD41_VOLTAGEWINDOW_33_32 |
                                 sdcapacity);
+#endif
               ret = SDIO_RECVR3(priv->dev, SD_ACMD41, &response);
               if (ret != OK)
                 {
@@ -4367,18 +4578,23 @@ static int mmcsd_probe(FAR struct mmcsd_state_s *priv)
               priv->mediachanged = true;
             }
 
-          /* When the card is identified, we have probed this card */
+          /* Publish the card only after initialization succeeds. */
 
-          priv->probed = true;
-          for (i = 0; i < MMCSD_PART_COUNT; i++)
+          if (ret == OK)
             {
-              priv->part[i].priv = priv;
-              if (priv->part[i].nblocks != 0)
+              /* When the card is identified, we have probed this card */
+
+              priv->probed = true;
+              for (i = 0; i < MMCSD_PART_COUNT; i++)
                 {
-                  snprintf(devname, sizeof(devname), "/dev/mmcsd%d%s",
-                           priv->minor, g_partname[i]);
-                  register_blockdriver(devname, &g_bops, 0666,
-                                       &priv->part[i]);
+                  priv->part[i].priv = priv;
+                  if (priv->part[i].nblocks != 0)
+                    {
+                      snprintf(devname, sizeof(devname), "/dev/mmcsd%d%s",
+                               priv->minor, g_partname[i]);
+                      register_blockdriver(devname, &g_bops, 0666,
+                                           &priv->part[i]);
+                    }
                 }
             }
         }
@@ -4591,6 +4807,98 @@ static FAR const char *mmc_get_mode_name(uint8_t mode)
  *     be initialized and ready to use.
  *
  ****************************************************************************/
+
+
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+/* Trusted manual caller, no block device registration or media callbacks.
+ * Persistent state is retained on every result. Never a recovery API.
+ */
+static struct mmcsd_state_s g_scrdiag_state;
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+static bool g_scrdiag_ready;
+static bool g_sector_attempted;
+#endif
+int mmcsd_scr_diagnostic(struct sdio_dev_s *dev)
+{
+#define state g_scrdiag_state
+  static bool started;
+  irqstate_t flags = enter_critical_section();
+  if (started || dev == NULL)
+    {
+      leave_critical_section(flags);
+      return dev == NULL ? -EINVAL : -EBUSY;
+    }
+  started = true;
+  leave_critical_section(flags);
+  state.dev = dev;
+  state.caps = SDIO_CAPABILITIES(dev);
+  state.buswidth = MMCSD_SCR_BUSWIDTH_1BIT;
+  int ret = SDIO_ATTACH(dev);
+  if (ret != OK) return ret;
+  ret = mmcsd_cardidentify(&state);
+  if (ret != OK) return ret;
+  if (!IS_SD(state.type)) return -ENOTSUP;
+  ret = mmcsd_sdinitialize(&state);
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  flags = enter_critical_section();
+  g_scrdiag_ready = ret == OK;
+  leave_critical_section(flags);
+#endif
+  return ret;
+#undef state
+}
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* Internal validation from the immutable successful-identification record.
+ * Do not trust the generic32-bit geometry for the 2^32-block boundary.
+ */
+static int mmcsd_sector_validate(struct mmcsd_state_s *priv, uint64_t lba,
+                                 uint64_t *capacity)
+{
+  if (priv->type != (MMCSD_CARDTYPE_SDV2 | MMCSD_CARDTYPE_BLOCK) ||
+      (priv->csd[0] >> 30) != 1 || ((priv->csd[1] >> 16) & 15) != 9 ||
+      priv->blocksize != 512 || priv->blockshift != 9)
+    return -ENOTSUP;
+  uint32_t csize = ((priv->csd[1] & 0x3f) << 16) | (priv->csd[2] >> 16);
+  uint64_t blocks = ((uint64_t)csize + 1) << 10;
+  if (lba >= blocks || lba > UINT32_MAX) return -ERANGE;
+  *capacity = blocks;
+  return OK;
+}
+/* Trusted task-only API for the optional one-shot diagnostic CLI.
+ * One attempt after successful SCR identification, no writes, no retry.
+ */
+int mmcsd_sector_readonce(struct sdio_dev_s *dev, uint64_t lba,
+                           uint8_t *output, size_t output_size)
+{
+  struct mmcsd_state_s *priv = &g_scrdiag_state;
+  struct scr_lease_key key;
+  uint8_t *arena;
+  uint64_t capacity;
+  int ret;
+  if (!dev || !output || output_size != 512) return -EINVAL;
+  irqstate_t flags = enter_critical_section();
+  if (!g_scrdiag_ready || dev != priv->dev || g_sector_attempted)
+    { leave_critical_section(flags); return -EBUSY; }
+  ret = mmcsd_sector_validate(priv, lba, &capacity);
+  if (ret != OK) { leave_critical_section(flags); return ret; }
+  g_sector_attempted = true;
+  leave_critical_section(flags);
+  ret = stm32_sector_claim(dev, lba, capacity, true, &arena, &key);
+  if (ret != OK) return ret;
+  SDIO_BLOCKSETUP(dev, 512, 1);
+  SDIO_WAITENABLE(dev, SDIOWAIT_TRANSFERDONE | SDIOWAIT_TIMEOUT |
+                      SDIOWAIT_ERROR, MMCSD_BLOCK_RDATADELAY);
+  ret = SDIO_DMARECVSETUP(dev, arena, 512);
+  if (ret == OK) ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD17, (uint32_t)lba);
+  if (ret == OK) ret = mmcsd_recv_r1(priv, MMCSD_CMD17);
+  if (ret == OK) ret = mmcsd_eventwait(priv, SDIOWAIT_TIMEOUT | SDIOWAIT_ERROR);
+  /* The finish path seals failures before releasing caller ownership.
+   * No generic cancel/reset or retry, even when the transfer failed early.
+   */
+  return stm32_sector_finish(dev, key, ret, output);
+}
+#endif
+#endif
 
 int mmcsd_slotinitialize(int minor, FAR struct sdio_dev_s *dev)
 {
