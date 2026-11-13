@@ -4080,7 +4080,12 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
    * for pre-idle. No effect for SD.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0xf0f0f0f0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0xf0f0f0f0);
+#endif
   MMCSD_USLEEP(MMCSD_IDLE_DELAY);
 
   /* After power up at least 74 clock cycles are required prior to starting
@@ -4091,7 +4096,12 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
 
   /* Then send CMD0 just once is standard procedure */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD0, 0);
+#endif
   MMCSD_USLEEP(MMCSD_IDLE_DELAY);
 
 #ifdef CONFIG_MMCSD_MMCSUPPORT
