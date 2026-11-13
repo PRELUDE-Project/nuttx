@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: Apache-2.0
+# The one-shot diagnostic is selected by CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+# in the STM32H7 architecture Kconfig. No independent app option is needed.
