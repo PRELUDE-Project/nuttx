@@ -1574,7 +1574,12 @@ static int mmcsd_setblocklen(FAR struct mmcsd_state_s *priv,
        * block length is specified in the CSD.
        */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD16, blocklen);
+      if (ret != OK) return ret;
+#else
       mmcsd_sendcmdpoll(priv, MMCSD_CMD16, blocklen);
+#endif
       ret = mmcsd_recv_r1(priv, MMCSD_CMD16);
       if (ret == OK)
         {
@@ -3899,7 +3904,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * identification state/card-identification mode
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD2, 0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD2, 0);
+#endif
   ret = SDIO_RECVR2(priv->dev, MMCSD_CMD2, cid);
   if (ret != OK)
     {
@@ -3917,7 +3927,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * Send CMD3 with argument 0, SD card publishes its RCA in the response.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, SD_CMD3, 0);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, SD_CMD3, 0);
+#endif
   ret = mmcsd_recv_r6(priv, SD_CMD3);
   if (ret != OK)
     {
@@ -3948,7 +3963,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * mode.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD9, (uint32_t)priv->rca << 16);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD9, (uint32_t)priv->rca << 16);
+#endif
   ret = SDIO_RECVR2(priv->dev, MMCSD_CMD9, priv->csd);
   if (ret != OK)
     {
@@ -3963,7 +3983,12 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
    * card selected all of the time.
    */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD7S, (uint32_t)priv->rca << 16);
+  if (ret != OK) return ret;
+#else
   mmcsd_sendcmdpoll(priv, MMCSD_CMD7S, (uint32_t)priv->rca << 16);
+#endif
   ret = mmcsd_recv_r1(priv, MMCSD_CMD7S);
   if (ret != OK)
     {
@@ -4237,7 +4262,12 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
         {
           /* Send CMD55 with argument = 0 */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+          ret = mmcsd_sendcmdpoll(priv, SD_CMD55, 0);
+          if (ret != OK) return ret;
+#else
           mmcsd_sendcmdpoll(priv, SD_CMD55, 0);
+#endif
           ret = mmcsd_recv_r1(priv, SD_CMD55);
           if (ret != OK)
             {
@@ -4253,9 +4283,16 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
             {
               /* Send ACMD41 */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+              ret = mmcsd_sendcmdpoll(priv, SD_ACMD41,
+                                MMCSD_ACMD41_VOLTAGEWINDOW_33_32 |
+                                sdcapacity);
+              if (ret != OK) return ret;
+#else
               mmcsd_sendcmdpoll(priv, SD_ACMD41,
                                 MMCSD_ACMD41_VOLTAGEWINDOW_33_32 |
                                 sdcapacity);
+#endif
               ret = SDIO_RECVR3(priv->dev, SD_ACMD41, &response);
               if (ret != OK)
                 {
