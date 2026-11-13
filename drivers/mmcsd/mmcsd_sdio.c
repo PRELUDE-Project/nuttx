@@ -4218,6 +4218,13 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
           ret = SDIO_RECVR7(priv->dev, SD_CMD8, &response);
         }
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+      /* The fixed-sector diagnostic requires SD v2; do not mask a failed
+       * interface-condition exchange by falling back to SD v1 probing.
+       */
+      if (ret != OK) return ret;
+#endif
+
       /* Were both the command sent and response received correctly? */
 
       if (ret == OK)
