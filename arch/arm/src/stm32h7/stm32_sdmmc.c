@@ -4263,6 +4263,11 @@ do { leave_critical_section(scrflags); return OK; } while (0);
 static int stm32_dmasendsetup(struct sdio_dev_s *dev,
                               const uint8_t *buffer, size_t buflen)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  /* This fixed-card diagnostic never submits a transmit data phase. */
+  return -ENOTSUP;
+#endif
+
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
 #ifdef CONFIG_SD_SCR_CONTAINMENT_REVIEW
   irqstate_t scrflags = enter_critical_section();
