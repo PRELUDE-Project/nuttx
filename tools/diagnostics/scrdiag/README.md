@@ -16,7 +16,7 @@
 
 `app/` はNuttX Apps用のソースオーバーレイです。このリポジトリ内に保存して変更を同じコミットで追跡します。別のAppsリポジトリを自動更新するものではありません。
 
-検証したAppsの基準は `8ff533beb37eeef1f288c467acd7c50b542464eb` です。承認された作業コピーの `system/scrdiag/` に `app/Makefile`、`app/Make.defs`、`app/scrdiag_main.c` を配置します。既存ディレクトリや変更を上書きせず、まず差分を確認してください。既存の `system/Make.defs` のwildcardから登録されます。独自のApps Kconfigは不要です。
+検証したAppsの基準は `8ff533beb37eeef1f288c467acd7c50b542464eb` です。承認された作業コピーの `system/scrdiag/` に `app/Makefile`、`app/Make.defs`、`app/Kconfig`、`app/scrdiag_main.c` を配置します。既存ディレクトリや変更を上書きせず、まず差分を確認してください。既存の `system/Make.defs` のwildcardから登録されます。アプリ独自の設定項目は追加しませんが、`app/Kconfig` の配置は必要です。このファイルがないと、生成済みKconfigのない作業コピーで `make olddefconfig` がアプリに未定義の `preconfig` ターゲットを要求して失敗します。
 
 公開APIは `include/nuttx/mmcsd_scrdiag.h` です。アプリの `sdio_initialize` / `sdio_mediachange` はH753向けのアダプター依存です。別機種への移植可能性は確認していません。APIは信頼されたtask context専用で、raw ioctlとして公開しません。
 
