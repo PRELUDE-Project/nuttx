@@ -926,6 +926,9 @@ static bool scr_denied(struct stm32_dev_s *priv)
 }
 static void scr_close_producers(struct stm32_dev_s *priv)
 {
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  wd_cancel(&priv->waitwdog);
+#endif
   stm32_configxfrints(priv, 0);
   priv->waitmask = 0;
   sdmmc_putreg32(priv, 0, STM32_SDMMC_MASK_OFFSET);
@@ -1942,6 +1945,14 @@ static void stm32_recvdma(struct stm32_dev_s *priv)
 static void stm32_eventtimeout(wdparm_t arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  /* A callback already dispatched before cancellation may arrive after
+   * one-shot quarantine/retirement. It must not publish another wakeup.
+   * This is not a hardware-stop or callback-join acknowledgement.
+   */
+  if (scr_closed(priv)) return;
+#endif
 
   /* There is always race conditions with timer expirations. */
 
