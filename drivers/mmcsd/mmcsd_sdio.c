@@ -1385,6 +1385,18 @@ static int mmcsd_eventwait(FAR struct mmcsd_state_s *priv,
       return wkupevent & SDIOWAIT_TIMEOUT ? -ETIMEDOUT : -EIO;
     }
 
+#ifdef CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW
+  /* This diagnostic waits only for SCR or sector receive completion.
+   * No-error is not sufficient when the expected completion is absent.
+   * Keep ordinary write-ready zero-event semantics unchanged.
+   */
+
+  if ((wkupevent & SDIOWAIT_TRANSFERDONE) == 0)
+    {
+      return -EIO;
+    }
+#endif
+
   /* Since there are no failure events, we must have been awakened by one
    * (or more) success events.
    */
