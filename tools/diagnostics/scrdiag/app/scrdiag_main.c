@@ -6,11 +6,24 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 extern struct sdio_dev_s *sdio_initialize(int slotno);
 extern void sdio_mediachange(struct sdio_dev_s *dev, bool present);
 #ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* CRC-32/ISO-HDLC over successful CPU output; not a card-integrity proof. */
+static uint32_t sector_crc32(const uint8_t *data, size_t length)
+{
+  uint32_t crc = UINT32_MAX;
+  for (size_t i = 0; i < length; i++)
+    {
+      crc ^= data[i];
+      for (unsigned bit = 0; bit < 8; bit++)
+        crc = (crc >> 1) ^ ((crc & 1) ? UINT32_C(0xedb88320) : 0);
+    }
+  return crc ^ UINT32_MAX;
+}
 /* Deliberately no signs, whitespace, prefixes or partial conversions. */
 static bool sector_lba(const char *text, uint32_t *value)
 {
@@ -35,7 +48,7 @@ int scrdiag_main(int argc, char **argv)
 #ifdef CONFIG_SD_SECTOR_READ_REVIEW
   uint32_t lba = 0;
   /* CPU destination only: the driver owns its separate persistent DMA arena.
-   * No sector bytes or checksum are exposed by this diagnostic.
+   * Sector bytes are never printed; only a successful read checksum is shown.
    */
   static uint8_t output[512];
   if (argc == 3 && argv != NULL && argv[1] != NULL &&
@@ -62,6 +75,12 @@ int scrdiag_main(int argc, char **argv)
 #ifdef CONFIG_SD_SECTOR_READ_REVIEW
   if (sector && ret == 0)
     ret = mmcsd_sector_readonce(dev, lba, output, sizeof(output));
+#endif
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+  if (sector && ret == 0)
+    printf("Read summary: bytes=512 CRC32/ISO-HDLC=%08" PRIx32
+           "; not compared with expected data; no stop proof\n",
+           sector_crc32(output, sizeof(output)));
 #endif
   if (sector)
     printf("Single-sector diagnostic result %d; no data displayed; no stop proof; no retry\n", ret);
