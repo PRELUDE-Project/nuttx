@@ -1257,7 +1257,11 @@ static int mmcsd_get_r1(FAR struct mmcsd_state_s *priv, FAR uint32_t *r1)
    * R1 card status register.
    */
 
-  mmcsd_sendcmdpoll(priv, MMCSD_CMD13, (uint32_t)priv->rca << 16);
+  ret = mmcsd_sendcmdpoll(priv, MMCSD_CMD13, (uint32_t)priv->rca << 16);
+  if (ret != OK)
+    {
+      return ret;
+    }
   ret = SDIO_RECVR1(priv->dev, MMCSD_CMD13, &local_r1);
   if (ret == OK)
     {
