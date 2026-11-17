@@ -13,3 +13,16 @@ The 269 cases cover lengths 1, 2, 3, 4, 5, 511 and 512, pausing at every possibl
 The register operations are FIFO-capacity stubs. This verifies the extracted function's software copying and bounds behavior only. It does not exercise a real IRQ, scheduler, DMA, card, bus timing, physical cancellation, cache coherence or write completion. It does not enable a write diagnostic or establish permission to write media. ARM compilation and hardware validation are separate evidence.
 
 The full-source pin deliberately requires explicit review after unrelated edits too. The extraction assumes the pinned function's present brace/comment structure; it is not a general C parser.
+
+## Reviewed source-pin refresh
+
+The current production source at `1ecf2a5d949a5c52b15d5cdf34ab86272d7131d4`
+was compared with the original pin's commit before refreshing the whole-file
+hash. The exercised function definitions are byte-identical; intervening changes
+were outside those definitions. This is an explicit applicability review, not
+permission to ignore future source mismatches. No runtime write capability,
+recovery operation or hardware test was added.
+
+The original pin was from `08c194148a20019760eefbd7435b5563cb336b36`.
+`stm32_sendfifo` was byte-identical. This runner already extracts that actual
+function on each invocation, rather than compiling a cached function body.
