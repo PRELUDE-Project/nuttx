@@ -222,6 +222,8 @@ int stm32_scr_claim(struct sdio_dev_s *dev, uint8_t **arena,
                     struct scr_lease_key *key)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  if (arena == NULL || key == NULL)
+    return -EINVAL;
   irqstate_t f = enter_critical_section();
   int ret = -EBUSY;
   uint32_t sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
@@ -1550,4 +1552,13 @@ if(event==0)sdio_mediachange(&p->dev,false);else sdio_wrprotect(&p->dev,true);as
 }
 /* Wrong generation cannot copy; current lease remains owned. */
 fresh(p);key=begin(p);other=key;other.generation++;memset(out,0xa5,512);assert(stm32_sector_finish(&p->dev,other,0,out)==-ESTALE&&out[0]==0xa5);
+/* Invalid SCR result pointers must not acquire or alter any lease. */
+for(unsigned state=0;state<5;state++)for(unsigned bad=1;bad<4;bad++){
+fresh(p);p->scrlease.state=state;struct stm32_dev_s before=*p;
+unsigned char saved[sizeof(regs)];memcpy(saved,regs,sizeof(regs));
+struct scr_lease_key nullkey={0},nullbefore=nullkey;uint8_t*nullarena=(void*)0x1234;
+assert(stm32_scr_claim(&p->dev,bad&1?NULL:&nullarena,bad&2?NULL:&nullkey)==-EINVAL);
+assert(memcmp(&before,p,sizeof(before))==0&&memcmp(saved,regs,sizeof(regs))==0);
+assert(memcmp(&nullkey,&nullbefore,sizeof(nullkey))==0&&nullarena==(void*)0x1234);
+}
 munmap(m,4096);puts("PASS actual sector review claim/setup/CMD17/R1/ISR/endwait/finish:512 copy,IRQ errors,timeout+lateDATAEND,reentry,owner/generation,full SRAM bound. MMIO/timer/CPU mocked; not physical-stop or upper-card-validation proof.");}

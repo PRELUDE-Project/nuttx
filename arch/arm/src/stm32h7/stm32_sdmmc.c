@@ -988,6 +988,8 @@ int stm32_scr_claim(struct sdio_dev_s *dev, uint8_t **arena,
                     struct scr_lease_key *key)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
+  if (arena == NULL || key == NULL)
+    return -EINVAL;
   irqstate_t f = enter_critical_section();
   int ret = -EBUSY;
   uint32_t sta = sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET);
