@@ -1,6 +1,9 @@
 {
-  "arch/arm/src/stm32h7/stm32_sdmmc.c": "22c7b7e04a03e0511bef4b4638eafa6bcf15af50e72b58d828ccacf3c75844ef",
-  "drivers/mmcsd/mmcsd_sdio.c": "9bb6580162fd7480fc46bb6db95926429f00bccd472efd8903b3b3fe7a72c053",
+  "arch/arm/src/stm32h7/hardware/stm32h7x3xx_sdmmc.h": "e1e1f7e7685520bd0b6f149f7b16a5bb88c7bbcb4151254c10c8d52e1cc443d9",
+  "arch/arm/src/stm32h7/stm32_sdmmc.c": "77b99406c6cbce2575e920f973a0a2d0ab0c5660ce2cd528505234c12b327bff",
+  "drivers/mmcsd/mmcsd_sdio.c": "921af2bcedce55624ab550a60bf70a4b8c4e7db6fd1f3dbf5cc80a81162df684",
+  "drivers/mmcsd/mmcsd_sdio.h": "b218f753603780f586320e048e5695dd95fc645f2c2008de309b3017f477a435",
   "include/nuttx/scr_lease_review.h": "7a8b1033c0f7ef527b767d247936b10ccda20265de74ad5b762410a30975ab79",
-  "tools/diagnostics/scrdiag/app/scrdiag_main.c": "fa313b7556142b7bc4ae9ebf85bb6b33dc8f345933427e2a9cad6df54affa1e4"
+  "include/nuttx/sdio.h": "71aa05f752741498a4cfef8adc7cbe22f00f088adbbaf00f98ec85f5953846e0",
+  "tools/diagnostics/scrdiag/app/scrdiag_main.c": "24f637a70b1c1d49ca2f7cc74c1a5aaf13c2790a451726d4e9e0fa80fb04d76b"
 }
