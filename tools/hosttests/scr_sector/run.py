@@ -24,4 +24,5 @@ with tempfile.TemporaryDirectory(prefix='scr-sector-host-') as tmp:
             summary="Read summary:" in result.stdout
             assert summary == (enabled and mode==0), "CRC summary must appear only after successful sector read"
             print(result.stdout, end="")
+subprocess.run([sys.executable, str(p/"test_eventwait_error.py")], check=True)
 print('PASS pinned host tests. MMIO, timers and OS/device APIs are mocked; no physical-stop proof.')

@@ -7,7 +7,7 @@ from pathlib import Path
 import argparse, hashlib, json, re
 
 def span(text, name):
-    pattern = r"\b(?:static\s+)?(?:inline\s+)?(?:int|bool|void|size_t|uint32_t)\s+" + re.escape(name) + r"\([^;{}]*?\)\s*\{"
+    pattern = r"\b(?:static\s+)?(?:inline\s+)?(?:int|bool|void|size_t|uint32_t|sdio_eventset_t)\s+" + re.escape(name) + r"\([^;{}]*?\)\s*\{"
     matches = list(re.finditer(pattern, text))
     if len(matches) != 1:
         raise ValueError(f"Expected one definition for {name}, found {len(matches)}")

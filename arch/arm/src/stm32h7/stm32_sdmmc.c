@@ -3949,6 +3949,13 @@ static sdio_eventset_t stm32_eventwait(struct sdio_dev_s *dev)
            * return an SDIO error.
            */
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+          /* Seal before returning a failed wait. The caller may never
+           * reach finish; do not leave an ACTIVE CPU destination behind.
+           * This revokes producers, not physical IDMA ownership.
+           */
+          scr_seal(priv, -EIO);
+#endif
           wd_cancel(&priv->waitwdog);
           wkupevent = SDIOWAIT_ERROR;
           goto errout_with_waitints;
