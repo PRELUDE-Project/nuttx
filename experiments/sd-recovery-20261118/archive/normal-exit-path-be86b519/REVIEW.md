@@ -1,0 +1,13 @@
+# 通常終了と共通recover経路
+
+固定be86b519の通常終了原典6件を取得しblobを照合。flat taskでは nxtask_start → nxtask_startup → main → exit → _exit → up_exit → nxtask_exit → release_tcb と進む。
+
+未読だったsched/task/exit.cで、_exitがcritical内でEXIT_PROCESSINGを立て、nxtask_exithookを呼んでからup_exitへ進むことを確認した。exithookの先頭側にはnxtask_recoverがある。前回の『recoverだけでは通常終了経路が未確認』は解消した。外部deleteはterminate内のcriticalからexithookへ、restartはcritical内のreset_taskからrecoverへ進む。対象TCBが存在し、releaseまたはup_initial_stateより前の共通挿入点を確認できた。
+
+既存原典を使うPythonの呼出し位置assertで、通常_exit・外部terminate・restartの主要順序を点検してPASS。文字列位置の静的検査であって全制御フローや実OS同期を証明するものではない。ARM up_exit本体も取得し、nxtask_exitの後にcontext restoreへ進むことを読取確認した。
+
+通知インターフェースはまだ未実装。通知はthis_task()ではなく終了対象TCBを扱い、永続登録とlease世代を照合する必要がある。終了taskのstackを参照せず、ACTIVEを隔離するだけに限定し、物理IDMA停止やarena解放は行わない。HANDOFFの跨task引継ぎを不用意に変更しない。登録・claim・解除と通知の競合検証、対象ビルドが必要なので、汎用schedulerへH7専用呼出しを推測で追加していない。
+
+保存・検査コマンドが環境切替でTurnAbortedになったため、正規一覧でcloud connectedを確認してattach。既存ファイルを確認し、原典6件とsources.jsonだけ保存済みでreport/scriptは未作成と確定した後、未完の検査とこのreport保存を行った。結果不明操作の盲目的再送はしていない。
+
+製品変更・公開・実機操作なし。正式H753 config、ARM対象ビルド、実OS終了試験、物理IDMA停止は未確認。電源HOLD維持。

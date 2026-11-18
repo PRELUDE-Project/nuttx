@@ -1,0 +1,14 @@
+{
+  "command": [
+    "cc",
+    "-E",
+    "-H",
+    "-nostdinc",
+    "-I${RECOVERY_ROOT}/exit-cache-preprocess",
+    "-I${RECOVERY_ROOT}/nuttx/include",
+    "-x",
+    "c",
+    "${RECOVERY_ROOT}/nuttx/include/nuttx/sched.h"
+  ],
+  "returncode": 1
+}

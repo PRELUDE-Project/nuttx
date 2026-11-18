@@ -1,0 +1,1 @@
+PASS 12 actual SCR handoff rejection causes: failed sector attempt retires permanently, preserves out/key, and cannot retry after condition clears

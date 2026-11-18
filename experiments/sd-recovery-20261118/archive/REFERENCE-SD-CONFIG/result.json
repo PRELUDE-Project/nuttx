@@ -1,0 +1,41 @@
+{
+  "classification": "NEW REFERENCE CANDIDATE ONLY; not restored 08504, not adopted H753 hardware config",
+  "nuttx": "627d0ec82c4d33fad252547bc65462e4d2d3effd",
+  "apps": "8ff533beb37eeef1f288c467acd7c50b542464eb",
+  "effective": {
+    "ARCH_CHIP_STM32H753ZI": "y",
+    "ARCH_BOARD_CUSTOM": "y",
+    "ARCH_BOARD_CUSTOM_DIR": "boards/arm/stm32h7/nucleo-h743zi2",
+    "ARCH_BOARD_CUSTOM_DIR_RELPATH": "y",
+    "ARMV7M_DCACHE": "n",
+    "STM32H7_SDMMC1": "y",
+    "STM32H7_SDMMC_IDMA": "y",
+    "MMCSD": "y",
+    "MMCSD_SDIO": "y",
+    "MMCSD_READONLY": "y",
+    "MMCSD_MMCSUPPORT": "n",
+    "MMCSD_IOCSUPPORT": "n",
+    "FS_FAT": "n",
+    "NSH_DISABLE_MOUNT": "y",
+    "NSH_DISABLE_UMOUNT": "y",
+    "SYSTEM_DD": "n",
+    "SD_SCR_CONTAINMENT_REVIEW": "y",
+    "SD_RECEIVE_LEASE_ONLY_REVIEW": "y",
+    "SD_SECTOR_READ_REVIEW": "y",
+    "SCHED_HPWORK": "y",
+    "SCHED_HPNTHREADS": "1"
+  },
+  "extra": {
+    "SMP": "n",
+    "ARMV7M_USEBASEPRI": "<absent>",
+    "ARCH_HIPRI_INTERRUPT": "n",
+    "ARCH_CHIP_STM32H743ZI": "n",
+    "ARCH_BOARD_NUCLEO_H743ZI2": "n",
+    "SDMMC_CHECK": "<absent>",
+    "INIT_ENTRYPOINT": "nsh_main",
+    "BUILD_FLAT": "y"
+  },
+  "warnings": [],
+  "roundtrip_warnings": [],
+  "sha256": "7af7b8868b92358266b44f9ec00e16da14946680a3457eaf680d92e8a9031a23"
+}

@@ -1,0 +1,21 @@
+# 複数workerと停止保証の境界
+
+対象は PRELUDE-Project/nuttx PR 1、確認時 HEAD 627d0ec82c4d33fad252547bc65462e4d2d3effd（open/Draft）。固定コミットの kwork_queue.c、kwork_thread.c、kwork_cancel.c、wqueue.h を再取得しGit blob SHA一致で保存した。製品差分は作っていない。
+
+## 原典で確認したこと
+work_queue_period_wq は実行中callbackの完了を待たず、work_available（worker == NULL）なら再予約できる。work_thread はcallback呼出しより前にwork->worker=NULLとし、関数と引数をローカルへ退避し、kworker->workで実行中を保持する。このため同じworkを再予約して別workerが受け取る構造は、work_availableだけでは排除できない。
+
+work_qcancel(sync=true) は実行中worker配列を走査するが、最初の一致でbreakし、そのworkerのセマフォだけを待つ。複数実行中インスタンスの一括joinと解釈してはいけない。自己workerは待機対象から除外する。cancelの戻り値0もハード停止を表さない。
+
+## 実行した独立回帰
+固定原典からwork_qcancel本体を無変更で抽出。pthread mutex/semに同期primitiveを対応させ、同一workを2workerが保持する状態を設定した。別pthreadからsync cancelを呼び、最初のworkerだけ終了させるとcancelが戻り、2番目のworkがactiveのままであることを1000回確認。UBSanと-Werrorで成功。test.py、cancel_two.c、result.logを保存。
+
+これは実cancel関数の待機境界の試験であり、2worker状態はseed、queue/dispatch/OS scheduler全体の実行ではない。実NuttX並列試験やARM実行済みとは扱わない。work_thread原典が示す再予約可能性と、seedした状態の到達性を分けて記録した。
+
+## 現行固定診断への適用
+CONFIG_SD_SECTOR_READ_REVIEWではstm32_callback先頭でreturnし、新規callback producerを作らない。前回実関数ON/OFF各10000回の受付試験と整合する。PIO監視はHPWORKでなくfifowdogであり、現行lower唯一のwork_queue呼出しはmedia callback。従って今回の結果をそのままsector診断の二重worker不具合とは扱わない。既存callbackを取得済みの状態や通常非sector利用へ、単にwork_cancel_syncを足して安全とする修正は不適切。
+
+scr_close_producersはwait/fifo watchdog、割込maskとソフト参照を閉じるが、IDMA停止ackを返す関数ではない。閉鎖状態のIRQとtimeout callbackは早期returnする。正常finishはDATAEND/DCOUNT/DPSM等を検査してIDMACTRLを0に書きreadbackするが、これらのソフト模擬は対象実機の物理停止や既存DMA transaction消滅を証明しない。異常時のarena隔離と同一boot再使用禁止を維持し、強制解放や再試行修正を加えていない。
+
+## 残件
+実NuttX schedulerでの複数worker統合試験、対象ARMビルド、H753の元SD生成config 08504bb7…の復元、起動電源条件、物理IRQ/IDMA観測は未完。別に見つかったC2A/USART生成config 711623f3…はSD正式設定ではない。新しい正規SD生成元は本工程では発見していない。実機・公開・結果不明git操作の再送なし。

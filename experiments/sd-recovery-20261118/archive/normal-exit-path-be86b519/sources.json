@@ -1,0 +1,32 @@
+[
+  {
+    "path": "arch/arm/src/common/arm_exit.c",
+    "sha": "1f184e6bce66143342228e720b9e1b7e212d0311",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/be86b5194ed8f88009c3f867bda71420a5b9d161/arch/arm/src/common/arm_exit.c"
+  },
+  {
+    "path": "libs/libc/stdlib/lib_exit.c",
+    "sha": "3d371f2e7d99fb46ca920cf4cef8335d64a62f53",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/be86b5194ed8f88009c3f867bda71420a5b9d161/libs/libc/stdlib/lib_exit.c"
+  },
+  {
+    "path": "sched/task/task_exit.c",
+    "sha": "9a021849eba9ea5f4cc258799a7024bc95f80c53",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/be86b5194ed8f88009c3f867bda71420a5b9d161/sched/task/task_exit.c"
+  },
+  {
+    "path": "sched/task/task_start.c",
+    "sha": "815b78bc064460c387ba65dbc187c92f95640029",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/be86b5194ed8f88009c3f867bda71420a5b9d161/sched/task/task_start.c"
+  },
+  {
+    "path": "sched/task/exit.c",
+    "sha": "bf696bc82dbefd29d89dc9371791a906561723d6",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/be86b5194ed8f88009c3f867bda71420a5b9d161/sched/task/exit.c"
+  },
+  {
+    "path": "libs/libc/sched/task_startup.c",
+    "sha": "f35d2d33fa02086e6b3a5f9832c036bca6b3de26",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/be86b5194ed8f88009c3f867bda71420a5b9d161/libs/libc/sched/task_startup.c"
+  }
+]

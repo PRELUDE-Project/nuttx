@@ -1,0 +1,80 @@
+{
+  "scope": "host UBSan; not target/OS/hardware",
+  "cases": [
+    {
+      "case": "recover-atomic-binding",
+      "result": "PASS",
+      "stdout": "PASS proposed atomic claim/register/failure and actual SCR HANDOFF/unbind/sector transfer/new-owner seal; host only"
+    },
+    {
+      "case": "recover-export-integration",
+      "result": "PASS",
+      "stdout": "PASS existing-name facade SCR/handoff, invalid LBA, LBA7 forwarding, recover/finish errno preservation. Host proposal only."
+    },
+    {
+      "case": "recover-finish-tcb-scope",
+      "result": "PASS",
+      "stdout": "PASS scoped finish: missing/colliding TCB rejected, distinct replacement TCB rejected, valid owner HANDOFF. Host only."
+    },
+    {
+      "case": "recover-fixed-hook",
+      "result": "PASS",
+      "stdout": "PASS existing-name facade SCR/handoff, invalid LBA, LBA7 forwarding, recover/finish errno preservation. Host proposal only."
+    },
+    {
+      "case": "recover-key-binding",
+      "result": "PASS",
+      "stdout": "PASS static device/full lease key binding: stale owner/generation/instance rejected, duplicate registration preserves token; host only"
+    },
+    {
+      "case": "recover-os-source-candidate",
+      "result": "PASS",
+      "stdout": "PASS existing-name facade SCR/handoff, invalid LBA, LBA7 forwarding, recover/finish errno preservation. Host proposal only."
+    },
+    {
+      "case": "recover-seal-callgraph",
+      "result": "PASS",
+      "stdout": "PASS actual recover+seal+wd_cancel connection: inactive/active timer, head/nonhead; no callback, no IDMA release. Host doubles, not OS/hardware."
+    },
+    {
+      "case": "recover-tcb-scope",
+      "result": "PASS",
+      "stdout": "PASS actual TCB lookup within outer claim scope; hash collision rejected before claim; recovered lease rejects modeled PID reuse. Host not OS."
+    },
+    {
+      "case": "preflight-baseline",
+      "result": "PASS",
+      "stdout": "PASS proposed atomic claim/register/failure and actual SCR HANDOFF/unbind/sector transfer/new-owner seal; host only"
+    },
+    {
+      "case": "preflight-candidate",
+      "result": "PASS",
+      "stdout": "PASS proposed atomic claim/register/failure and actual SCR HANDOFF/unbind/sector transfer/new-owner seal; host only"
+    },
+    {
+      "case": "preflight-baseline-generation",
+      "result": "PASS",
+      "stdout": "PASS proposed atomic claim/register/failure and actual SCR HANDOFF/unbind/sector transfer/new-owner seal; host only"
+    },
+    {
+      "case": "preflight-candidate-generation",
+      "result": "PASS",
+      "stdout": "PASS proposed atomic claim/register/failure and actual SCR HANDOFF/unbind/sector transfer/new-owner seal; host only"
+    },
+    {
+      "case": "reset-baseline",
+      "result": "PASS",
+      "stdout": "PASS actual reset_task body connected to proposed recovery notification; scheduler and TCB ABI mocked."
+    },
+    {
+      "case": "reset-candidate",
+      "result": "PASS",
+      "stdout": "PASS actual reset_task body connected to proposed recovery notification; scheduler and TCB ABI mocked."
+    },
+    {
+      "case": "split-host",
+      "result": "PASS",
+      "stdout": "PASS existing-name facade SCR/handoff, invalid LBA, LBA7 forwarding, recover/finish errno preservation. Host proposal only."
+    }
+  ]
+}

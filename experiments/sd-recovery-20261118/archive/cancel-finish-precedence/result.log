@@ -1,0 +1,25 @@
+sector=0 timeout_before_cancel=1 input=0 return=-110 stored=-110
+sector=0 timeout_before_cancel=1 input=-16 return=-110 stored=-110
+sector=0 timeout_before_cancel=1 input=-5 return=-5 stored=-110
+sector=0 timeout_before_cancel=1 input=-110 return=-110 stored=-110
+sector=0 timeout_before_cancel=1 input=-95 return=-95 stored=-110
+sector=0 timeout_before_cancel=1 input=-22 return=-22 stored=-110
+sector=0 timeout_before_cancel=0 input=0 return=-125 stored=-125
+sector=0 timeout_before_cancel=0 input=-16 return=-125 stored=-125
+sector=0 timeout_before_cancel=0 input=-5 return=-5 stored=-125
+sector=0 timeout_before_cancel=0 input=-110 return=-110 stored=-125
+sector=0 timeout_before_cancel=0 input=-95 return=-95 stored=-125
+sector=0 timeout_before_cancel=0 input=-22 return=-22 stored=-125
+sector=1 timeout_before_cancel=1 input=0 return=-110 stored=-110
+sector=1 timeout_before_cancel=1 input=-16 return=-110 stored=-110
+sector=1 timeout_before_cancel=1 input=-5 return=-110 stored=-110
+sector=1 timeout_before_cancel=1 input=-110 return=-110 stored=-110
+sector=1 timeout_before_cancel=1 input=-95 return=-110 stored=-110
+sector=1 timeout_before_cancel=1 input=-22 return=-110 stored=-110
+sector=1 timeout_before_cancel=0 input=0 return=-125 stored=-125
+sector=1 timeout_before_cancel=0 input=-16 return=-125 stored=-125
+sector=1 timeout_before_cancel=0 input=-5 return=-125 stored=-125
+sector=1 timeout_before_cancel=0 input=-110 return=-125 stored=-125
+sector=1 timeout_before_cancel=0 input=-95 return=-125 stored=-125
+sector=1 timeout_before_cancel=0 input=-22 return=-125 stored=-125
+PASS 24 actual cancel/finish error precedence cases; output retained and IDMA not falsely stopped

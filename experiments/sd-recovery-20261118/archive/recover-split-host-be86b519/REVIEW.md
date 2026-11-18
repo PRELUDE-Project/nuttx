@@ -1,0 +1,9 @@
+# 固定通知処理のhost分割リンクと再入契約
+
+scheduler.c と driver-host.c を別翻訳単位へ分離した。前者のhead/dispatchingはstatic、後者は固定sd_recovery_node/sd_recovery_notifyを定義。登録APIは関数pointerを受け取らない。テストだけにslot参照accessorをHOST_RECOVERY_TESTで提供し、defineなしでscheduler objectを作るとaccessorが存在しないことをnmで確認した。
+
+単一slotはcallback呼出前に解除され、dispatch中は再登録を拒否する。この条件のもとで通知処理の再入は、headが空であることをassertした上でreturnする仕様へ変更した。固定notify内へ人工的な通知再入を注入し、debug assertを有効にしたWerror+UBSan分割リンク実行で成功。従来の正常/引数/TCB/隔離回帰も維持。これは通知段階の再入のみであり、OSのtask_deleteやrestartをcallback中に実行してよいという意味ではない。
+
+このhost分割はNuttX本体の分割ビルドではない。recovery_lock_heldはdepthを参照するテスト関数で、正式OS同期APIへ置換できていない。NuttX側header/FAR/config namespace・未搭載stub・リンク配置・全終了経路を統合する作業が残る。未検証構成gateは先行候補にあるがこのhost objectは参考生成configからビルドしたものではない。
+
+製品公開済みはPR #1 HEAD be86b519のNULL引数防御とeventwaitエラー隔離等まで。本稿の通知slot・TCB原子化・export統合・固定hook・分割・再入試案はローカルのみ。ARM対象build・正式H753設定・物理IDMA停止・実機安全性を証明せず、実機操作・拒否の迂回・導入なし。

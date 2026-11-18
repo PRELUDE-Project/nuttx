@@ -1,0 +1,16 @@
+--- a/sched/task/task_recover.c
++++ b/sched/task/task_recover.c
+@@ -64,6 +64,13 @@
+ 
+ void nxtask_recover(FAR struct tcb_s *tcb)
+ {
++#ifdef CONFIG_SD_SECTOR_READ_REVIEW
++  /* Proposed fixed SD diagnostic hook, not a general callback registry. */
++  irqstate_t recovery_flags = enter_critical_section();
++  nxsched_sd_recovery_notify_locked(tcb);
++  leave_critical_section(recovery_flags);
++#endif
++
+ #if !defined(CONFIG_DISABLE_PTHREAD) && !defined(CONFIG_PTHREAD_MUTEX_UNSAFE)
+   /* Recover any mutexes still held by the canceled thread */
+ 

@@ -1,0 +1,9 @@
+# 実reset_task本体への通知接続比較
+
+対象: 固定版 task_restart.c の nxtask_reset_task 本体をそのまま抽出（FAR注釈のみ除去）。be86b519の抽出driverと既存API名統合試案を接続し、提案通知をrecover先頭へ挿入した候補と、挿入しない基準を比較した。従来の試験はrecoverを直接呼んでいたが、今回は実reset_task→recover→ready list除去→signal cleanup→up_initial_state→inactive list追加の関数順序を通した。
+
+UBSanで両比較を確認。基準ではclaim後のACTIVE・通知登録がTCB初期化工程へ持ち越される。候補はready list除去・signal cleanup・processor初期化・inactive追加の各観測点より前にQUARANTINEDと通知解除を完了した。priority/lockcount/task_stateの実reset代入も検査した。これは提案hookの必要性と挿入順序のhost証拠であり、既存製品にhookがあるという意味ではない。
+
+制限: 外側criticalはテスト側から与え、nxtask_restart全体や実schedulerは実行していない。TCBはhost専用簡略構造体、ready/signal/processor/list操作は観測stub。SMP・group kill・priority inheritanceを有効にした本体ではない。これら未検証構成は製品へ適用できない。実OS全終了経路・再入・登録APIの製品実装とconfig gate・独立レビュー・正式H753設定・ARM build・実機の停止保証は未完。IDMA物理停止、同一TCB/PIDの実再利用、実機電源条件を証明していない。
+
+製品公開、新規導入、拒否の再送、実機操作はなし。

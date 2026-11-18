@@ -1,0 +1,1 @@
+PASS 16 final ICR readback cases: success copies exact length; stuck DATAEND/new active/error bits quarantine without output and remain closed after clearing input. Host only.

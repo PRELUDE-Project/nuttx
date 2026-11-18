@@ -1,0 +1,1 @@
+PASS 108 finish authority cases: stale generation/key owner/current task cannot copy, seal, change MMIO, wake or barrier; legitimate error preserved. Host doubles only.

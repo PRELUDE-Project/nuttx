@@ -1,0 +1,11 @@
+# 新規の参考SD設定候補（正式採用・実機用ではない）
+
+復旧済みnuttx 627d0ec、Apps 8ff533のKconfigと固定Kconfiglibで生成。失われた08504bb7…の復元ではなく、H743 stock nshから、H753 chip/CUSTOMで同リポジトリのH743由来BSPを明示選択した新規候補。C2A用CUSTOM BSPは流用していない。
+
+candidate.config SHA256: 7af7b8868b92358266b44f9ec00e16da14946680a3457eaf680d92e8a9031a23。Kconfig生成と再読込みでwarnings 0、roundtrip.configはbyte一致。defconfigとconfig.hも保存。要求した22設定の実効値をassertし、IDMA/readonly/sector診断有効、cache/SMP/高優先割込/MMC/rawioctl/FAT/mount/umount/dd無効、HPWORK1、NSH入口を確認。
+
+意味: Kconfigとして整合する明示候補が作れた。未復元の元設定を推測で正式と呼ばない。実際のconfigure.sh/make olddefconfigやARMビルドを通した結果ではなく、復旧済みKconfigのparser生成。H753の電源起動安全、BSP物理配線、controller arenaの実ELF配置・DMA到達性、OS並列挙動を保証しない。
+
+入力の不足: 手元は部分復旧treeで全C/C++sourceが揃っていない。scrdiag app原典はnuttx内にあるが、Apps/system/scrdiagへの正式overlay配置とpreconfig再生成は未実施。現AppsにSDMMC_CHECK symbol自体は無い（外部appを追加した場合は再評価必要）。Kconfigのboards/dummyは既存のH743由来BSP Kconfigを参考生成用に配置したもの。CUSTOMディレクトリへのビルド時linkと実際のBSPファイル全体も未検証。
+
+次工程: 完全な固定依存の準備、scrdiag overlay登録、正式configure経路の生成結果比較、承認済みARM toolchain利用、target buildとELF検査。既報のpre-RAM電源安全HOLDを解消せずflash/reset/card操作へ進まない。製品の.configは上書きしていない。

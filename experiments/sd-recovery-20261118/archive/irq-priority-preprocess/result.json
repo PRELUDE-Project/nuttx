@@ -1,0 +1,15 @@
+{
+  "chip_blob": "721ad74a0a076e9973e23d0a3fc9e61c1027db93",
+  "command": [
+    "cc",
+    "-E",
+    "-dM",
+    "-x",
+    "c",
+    "-I${RECOVERY_ROOT}/irq-priority-preprocess",
+    "${RECOVERY_ROOT}/nuttx/arch/arm/include/armv7-m/nvicpri.h"
+  ],
+  "preprocess_returncode": 0,
+  "target_compile": false,
+  "config": "REFERENCE-SD-CONFIG/config.h"
+}

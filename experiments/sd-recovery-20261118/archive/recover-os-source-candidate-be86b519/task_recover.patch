@@ -1,0 +1,69 @@
+--- a/sched/task/task_recover.c
++++ b/sched/task/task_recover.c
+@@ -39,6 +39,53 @@
+ #include "sched/sched.h"
+ #include "task/task.h"
+ 
++#ifdef CONFIG_SD_SECTOR_READ_REVIEW
++#  include <errno.h>
++#  include <stdbool.h>
++#  include <nuttx/irq.h>
++#  include <nuttx/recovery_watch.h>
++static struct nxsched_recovery_watch_s *head;
++static bool dispatching;
++#define critical_depth depth
++int nxsched_recovery_bind_locked(struct nxsched_recovery_watch_s *n, struct tcb_s *owner, uint64_t gen,
++                       void (*notify)(struct nxsched_recovery_watch_s *, uint64_t))
++{
++  struct nxsched_recovery_watch_s *p;
++  /* Caller holds the lifetime-protecting critical section. */
++  if (dispatching) return -EBUSY;
++  if (!n || !owner || !notify || !gen) return -EINVAL;
++  for (p = head; p; p = p->next) if (p == n) return -EBUSY;
++  n->owner = owner; n->generation = gen; n->notify = notify;
++  n->next = head; head = n;
++  return 0;
++}
++int nxsched_recovery_unbind_locked(struct nxsched_recovery_watch_s *n, struct tcb_s *owner, uint64_t gen)
++{
++  struct nxsched_recovery_watch_s **p = &head;
++  /* Caller holds the lifetime-protecting critical section. */
++  while (*p && *p != n) p = &(*p)->next;
++  if (!*p || n->owner != owner || n->generation != gen) return -ESTALE;
++  *p = n->next;
++  n->next = NULL; n->owner = NULL;
++  return 0;
++}
++static void nxsched_recovery_notify_locked(struct tcb_s *owner)
++{
++  struct nxsched_recovery_watch_s **p = &head;
++  DEBUGASSERT(!dispatching);
++  dispatching = true;
++  while (*p) {
++    struct nxsched_recovery_watch_s *n = *p;
++    if (n->owner != owner) { p = &n->next; continue; }
++    /* Unlink before notifying; lifetime remains static, no queued callback. */
++    *p = n->next; n->next = NULL; n->owner = NULL;
++    n->notify(n, n->generation);
++    p = &head;
++  }
++  dispatching = false;
++}
++#endif
++
+ /****************************************************************************
+  * Public Functions
+  ****************************************************************************/
+@@ -64,6 +111,12 @@
+ 
+ void nxtask_recover(FAR struct tcb_s *tcb)
+ {
++#ifdef CONFIG_SD_SECTOR_READ_REVIEW
++  irqstate_t recovery_flags = enter_critical_section();
++  nxsched_recovery_notify_locked(tcb);
++  leave_critical_section(recovery_flags);
++#endif
++
+ #if !defined(CONFIG_DISABLE_PTHREAD) && !defined(CONFIG_PTHREAD_MUTEX_UNSAFE)
+   /* Recover any mutexes still held by the canceled thread */
+ 

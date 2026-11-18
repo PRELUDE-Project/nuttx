@@ -1,0 +1,13 @@
+# timeout後のIDMA制御書込み試行監査
+
+最新PR HEAD627d0ecを確認し、担当へ対象を連絡。固定実cancel/eventtimeout/finishを既存ホストfixtureへ接続し、MMIO doubleにIDMACTRLRとCMDSTOPの書込みカウンターを追加。SCR/sector × timeout先行/cancel先行 × finish入力6種 × DPSMACT/CPSMACT4組合せの96例がUBSan成功。
+
+全例でsetup後のIDMACTRLR書込み試行は0、CMDSTOP書込み試行も0。IDMAENの読戻し値が1のままという確認だけでなく、禁止されるタイミングの変更を試みないことをこの経路で確認した。caller出力不変と既存errno優先順位も維持。
+
+初版の試験カウンターでCMD offsetを12と誤記していた。固定fixtureは3であることを確認し、生成スクリプトに定義のassertを追加して修正・96例を再実行した。初版のCMD監査は証拠として採用しない。現在のresult.logは修正後。
+
+製品のnon-IDLE cancelはsealしてEINPROGRESSを返すため、下方の通常cancelのCMDSTOP→IDMA無効化へは到達しない。通常IDLE cancel/datadisableにはIDMA無効化が存在し、この試験はそれら一般経路の適法性まで保証しない。
+
+DPSMACT等はホスト入力、MMIO/OS同期はdouble。ゼロ書込みは物理停止の証明ではなく、恒久arena隔離を維持する設計の確認。物理DMA残存、カード側停止、target命令・バス順序、NMI/高優先度IRQ、正式H753configは未確認。実機操作・新規導入なし、電源条件HOLD維持。
+
+成果run.py/test.c/driver.c/result.log。製品変更なし。

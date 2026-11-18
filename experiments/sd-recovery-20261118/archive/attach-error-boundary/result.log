@@ -1,0 +1,1 @@
+PASS 30 attach admission/failure cases: exact errno, no enable/clear on rejection, controller clear before NVIC enable on success. OS/MMIO doubles only.

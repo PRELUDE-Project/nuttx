@@ -1,0 +1,9 @@
+# IRQ優先度ヘッダーの依存解決と前処理
+
+環境表示がWindowsへ切り替わっていたため正規一覧を再確認し、connectedの既存cloudへattachした。前回成果の存在を読取り確認。最新PR HEADは627d0ecのまま。
+
+欠落していた arch/arm/include/stm32h7/chip.h を固定627d0ecから復旧し、blob721ad74a0a076e9973e23d0a3fc9e61c1027db93との一致を検証。隔離ディレクトリだけに参考config.hとarch/chipリンクを用意し、実nvicpri.hを既存host ccで前処理した。exit0、優先度default0x80、step0x10、min0xf0、HIPRI無効を確認した。設定適用やARMコード生成はしていない。
+
+実nvicpri.hの説明は、HIPRIを有効にしてBASEPRIで通常IRQを禁止する場合、HIPRIはその禁止の外にあると明記する。従って既存driverのordinary IRQ critical sectionによる保証をHIPRI/SMP構成へ拡張しない。参考configはHIPRI無効だが、正式H753採用設定・実割込み優先度・attach/enable後の実NVIC状態は未確認。driver内にup_prioritize_irqの直接呼出しがないことだけで、システム全体の設定を断定しない。
+
+macros.log、stderr.log、result.jsonを保存。製品ツリーのincludeリンクやconfigは変更していない。電源条件HOLD、物理IDMA停止未証明、実機操作禁止を維持。対象ビルド・正式configure・追加ソフト導入・APT再試行はなし。

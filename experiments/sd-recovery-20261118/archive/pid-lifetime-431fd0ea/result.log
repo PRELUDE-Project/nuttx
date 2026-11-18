@@ -1,0 +1,1 @@
+PASS 2 numeric-ID models: quarantine survives ID reuse; ACTIVE saved-key continuation cannot distinguish a reincarnated numeric owner. Not an OS deletion/reuse test.

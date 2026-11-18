@@ -1,0 +1,13 @@
+# cancel後のfinishエラー優先順位
+
+対象PR 1の最新HEADを再読し627d0ec（open/Draft）不変を確認。sd_check_latestへ対象を連絡し、製品変更なしで実cancelとtimeout/finishを接続した独立回帰を実施。
+
+実stm32_cancelを固定lowerから無変更抽出し、前回の実eventtimeout・既存driver fixtureへ追加。SCR/sector×timeout先行ありなし×入力errno6種（0,EBUSY,EIO,ETIMEDOUT,ENOTSUP,EINVAL）の24例をUBSanで確認。初回compileは試験側WAITALL_ICRの重複定義で失敗し、余分な定義だけ除去後に成功した。
+
+結果: 非IDLEでcancelはEINPROGRESSを返し、物理停止成功とは返さない。timeout先行時の保存原因はETIMEDOUT、cancelのみではECANCELED。IDMAENは有効のまま。後続finishは出力512B全体を保持し、追加通知しない。
+
+注意するAPI差: SCR finishは入力0/EBUSYなら保存原因を返すが、それ以外の負errnoなら入力を返す。内部lease.resultは最初の原因を保持する。sector finishは隔離済みの場合すべての入力に保存原因を返す。従ってSCRの返値とleaseの保存原因が異なる場合がある。これは現コードの明示的な優先順位であり、単純に同じ規則へ揃えてはならない。
+
+実呼出元も確認: mmcsd_get_scr_dataはCMD55/ACMD51のsend/poll/response失敗を受けるとSDIO_CANCELしてから元のretを返し、mmcsd_get_scrがそれをfinishへ渡す。この経路でSCRを常に保存原因優先に変更すると、先行した実エラーが後始末cancelのECANCELEDで隠れる。現段階では製品修正を加えない。上位から同時timeoutとtransport失敗が発生した厳密な時系列はこの入力行列では証明していない。
+
+この試験は逐次ホスト接続で、OS同時実行・実IRQ・IDMA bus・実機は未検証。H753正式SD config/ARM target build/電源起動条件の不足も変わらない。H753設定の新しい探索結果は本工程にはない。公開や不明操作再送なし。

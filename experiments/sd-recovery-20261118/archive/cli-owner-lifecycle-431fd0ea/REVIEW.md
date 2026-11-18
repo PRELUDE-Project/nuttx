@@ -1,0 +1,23 @@
+# 固定AppsのCLI起動と所有者終了条件
+
+PR #1 の最新読取りは HEAD 431fd0ea、Draft/open。NuttXは同コミット、Appsは 8ff533beb37eeef1f288c467acd7c50b542464eb の原典を取得・blob照合した。各 .source.json に固定URLを記録。
+
+## 対象経路
+
+参考configは NSH_BUILTIN_APPS=y、LIBC_EXECFUNCS=n、SCHED_WAITPID=y、NSH_DISABLEBG=n。scrdiagのMakefileはApplication.mkを使い、priority100、stack4096でbuiltin登録する。Apps nsh_builtin → exec_builtin → task_spawn(builtin->main) と辿れ、NSH自身のstackで同期関数呼出しする形ではなく別taskとして起動する。foregroundではwaitpid、backgroundでは起動成功を返す。foregroundの待機が成功したこと自体はSD転送・停止の証明ではない。
+
+## forced終了の適用範囲
+
+参考configは SIG_DEFAULT=n、TTY_SIGINT=n、TTY_SIGTSTP=n。したがって読んだsig_default.cのSIGINT/SIGKILL標準終了経路や、端末Ctrl-CからのSIGINTをこの参考構成で有効と説明してはいけない。正式H753構成は未取得なので実機の同条件は未確定。
+
+pthread有効なので include/nuttx/sched.h の HAVE_GROUP_MEMBERS 条件には該当する。group_cancel_children_handlerは、指定した現task以外のgroup memberにFORCED_CANCELを設定してからpthread_cancelまたはnxtask_deleteへ進む。別groupのNSH子プロセス一般をすべて殺す意味ではない。単一threadのscrdiagだけでこのhandlerがscrdiag自身をforced削除するとは結論できない。
+
+ただしtask_restart.cはflat構成で残る。別taskに対するrestartは、取消し保留の確認を経ずnxtask_recover、同groupの他memberの終了、signal cleanup、up_initial_state、再activateへ進む。PID・TCB・stackサイズを維持して入口へ戻す。SDMMC leaseを終了する処理はない。したがって所有者のincarnation問題はPID番号が周回する場合だけではなく、明示task_restartにも関係する。現在のCLI・readonceのstatic started/attemptedはプロセス再起動APIでdriver状態ごと初期化されるものではなく、readonce側の再入拒否の既存結果を緩めない。
+
+## 修正判断と不足
+
+現行のtrusted one-shot CLIで自動復旧を追加しない。cancel無効化だけでrestartまで防げるとは言えず、PID/TCBアドレス置換でも同一TCB restartの区別がつかない。試験運用ではscrdiag実行taskへのtask_delete/task_restartを行わないことが最低条件。これは永久に終了不能なworkerの安全性を証明するものではない。強制終了も受け入れる製品設計には永続requestと所有者世代・終了通知を整合させる必要があり、未証明のIDMA停止を根拠にarenaを再利用しない。
+
+task_exit.cの実コードも確認した。コメントにはterminateへの説明があるが、現行nxtask_exit本体はrelease_tcbへ進む。通常_exitの完全経路はarchitecture側も必要で、コメントだけでtask_deleteと全経路同一と扱わない。
+
+新しいhost模擬数は増やしていない。今回は固定原典と参考configの実照合で、対象OS実行・ARMビルド・実機・IDMA物理停止ではない。製品公開・実機操作・導入なし。電源HOLD維持。task_spawnの内部実装は今回未読、探索した libs/libc/spawn/lib_task_spawn.c は404。正式configと採用起動手順、および実行taskの終了禁止条件の採用確認が次の不足。

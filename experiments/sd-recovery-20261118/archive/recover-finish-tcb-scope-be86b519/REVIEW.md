@@ -1,0 +1,9 @@
+# finish側のTCB寿命境界（未公開host案）
+
+対象は be86b519 の抽出driverと、固定版 sched_gettcb.c の実関数。先行案のclaimだけでなくfinishも、外側critical内で現在PIDからTCBを引き、そのまま既存のowner/key/登録整合性検査と実finishを呼ぶ形へ接続した。callerが任意のowner pointerを供給するAPIではない。
+
+UBSan結果: PID table欠落・hash衝突はESRCH、同PIDでも異なるTCBへの人工置換はESTALE、いずれも出力未変更・ACTIVE/通知維持。元のTCBへ戻した正常finishはHANDOFF・登録解除。この人工table変更は実OSの寿命遷移の再現ではない。同じPIDと同じTCBアドレスの再利用をこの照合だけで区別できるとは主張しない。その保証にはrecover通知が再利用前に必ず実行される製品統合が必要。
+
+前段のコピー前登録検査は独立レビュー済みだが、この追加接続はまだ独立レビュー前。OS通知API自体は新規設計で製品に存在しない。実スケジューラ・割込み・MMIOはモデルであり、ターゲットビルドや実機、物理IDMA停止の証拠ではない。既存export APIへの統合・全recover経路の網羅と排他・正式構成・ARM buildは未完。製品の変更や実機操作はしていない。
+
+既存ビルド環境は直前の探索結果を引き継ぐ。承認済みDebian kconfig-frontendsはcloud管理者経路不足、Windows WSLは一覧取得拒否、ARM13.2公式取得はtimeout。拒否や不明操作の再送、別ツールによる迂回は行っていない。

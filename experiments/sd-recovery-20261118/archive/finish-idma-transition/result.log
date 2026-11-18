@@ -1,0 +1,1 @@
+PASS 16 IDMA disable transition cases: success copies exact length; active/count/completion/IDMA faults quarantine without output and remain closed after restoring input. Host only.

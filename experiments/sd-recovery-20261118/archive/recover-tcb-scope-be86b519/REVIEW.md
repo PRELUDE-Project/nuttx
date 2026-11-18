@@ -1,0 +1,13 @@
+# TCB取得から登録までの寿命境界
+
+対象PR #1は照合時 be86b5194ed8f88009c3f867bda71420a5b9d161。固定 sched/sched/sched_gettcb.c (blob f31ecf4fee48c66c4d13a214cc6e3f8827b2e5d1) を全文取得・blob照合した。
+
+この正式APIは内部でcriticalを取り戻り前に解除する。原典自身が、戻ったTCBの安定性を必要とするcallerはAPI呼出前から外側criticalを保持せよと明記している。したがって、TCBを先に取得してから別critical内でclaim/registerする設計には寿命の隙間がある。
+
+今回の未公開host接続案はnxsched_gettid→実nxsched_get_tcb→実claim→通知登録→結果返却までを同じ外側criticalに置いた。callerに任意のowner pointerを渡させず、その場のlookup結果を用いる。hash slotの別PIDは実lookupで拒否しclaim前にESRCH、出力不変・IDLEのまま。正しいTCBを登録して実recover接続案で通知消費・隔離後、同じ数値/TCBを人工再配置しても再claimはEBUSY。UBSan成功。
+
+初回compileはhost scaffoldのpid_t未定義で失敗し、host専用int typedefを明示して修正した。TCB/PID table、critical、IDMA/MMIOは模擬であり、実OSのtask_delete/restart/PID再利用を実行していない。レジスタABI・ARM対象ビルド・実機の結果ではない。
+
+直接API迂回について、取得済み上位原典のSCR helperはstm32_scr_claim/finish、単発sector経路はstm32_sector_claim/finishを直接呼んでいる。したがって別名wrapperを追加するだけでは製品に効果がない。最終的に既存export関数の中へ同契約を統合し、内側raw実装を外から呼べなくする必要がある。今回は新しいOS通知APIがまだ未実装なので、架空のAPIを参照する製品パッチは公開しなかった。部分復旧ソースのgrepを全caller網羅とは扱わない。
+
+残条件：実OS全recover呼出の網羅と同期、登録解除に失敗した場合の出力契約、ACTIVEと登録の不変条件、config制約・正式H753設定、対象ビルド・実機。電源HOLD、IDMA隔離維持。

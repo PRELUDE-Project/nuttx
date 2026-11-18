@@ -1,0 +1,12 @@
+# 既存export APIへの接続試案
+
+be86b519抽出driver、既存scr_lease_review.h、実nxsched_get_tcbを用いた未公開host案。従来の別名wrapperでは上位既存callerが通知登録を迂回するため、4つの既存claim/finish名に登録・現在TCB解決・解除を置き、元実装をstatic raw helperとした。sectorの内部SCR claimはrawを呼び、二重登録しない。任意LBA/capacity/block-addressed引数をそのまま渡す。finishのmode確認も外側critical内に置いた。
+
+初回は実ヘッダーとの出力型不一致をコンパイラが検出した。SCR uint32_t[2]、sector uint8_t[512]に合わせて修正し、Werror+UBSanで成功。nmではraw4関数はlocal t、既存4名はglobal T。正常SCR→HANDOFF、無効LBA拒否とone-shot非消費、LBA7の引数伝播・通知登録、recover通知後sector finishのECANCELEDと512B出力保持を確認。
+
+ただしこれは単一固定controller、static通知binding、模擬TCB/critical/MMIOである。通知APIは提案であり製品OSにはない。実OS全recover経路・登録ライフサイクル・config制約の統合、独立レビュー、正式target build、実機と物理IDMA停止は未完。このhost TUは製品パッチではなく、既存API統合が必要となる具体箇所を検証したもの。製品公開・実機操作・無承認導入なし。既知のAPT/WSL拒否は再送していない。
+
+## 独立レビュー後の修正
+独立担当が既存binaryを再実行しPASS、TCB欠落と無効sector引数が同時の場合、元のEINVALよりESRCHが先に返る差を指摘した。sectorの純引数検査をTCB取得より前に置き、TCB欠落×無効LBA=EINVAL、TCB欠落×有効LBA=ESRCH、両方で出力不変・通知なし・one-shot未消費を直接回帰した。Werror/UBSan再成功。引数検査が二重化されているため製品化では共通helper化と同期が必要。現試案の全errno順序が製品と同一とは主張しない。
+
+固定task_restart.cの単CPU経路では、outer critical→nxtask_reset_task→nxtask_recover→TCB初期化→critical解除→activateを確認した。これは静的順序確認であり、今回のhostがtask_restartを実行したわけではない。実recover登録API、全終了経路排他、再入制約と設定gateは未完。
