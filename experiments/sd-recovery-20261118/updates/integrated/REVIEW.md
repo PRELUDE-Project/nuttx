@@ -1,0 +1,9 @@
+# OS/driverの統合候補（製品未適用）
+
+固定be86b519を基準に6ファイルの統合patchを作成。現在のruntime driver blob affa479b1cfebd404dd880d7ffa19466a07457baと一致を確認した別コピーで、OSの通知/validate API名、正式header、Make/CMake、driverの固定hook・登録/解除を揃えた。task_recoverへの早期通知のみで、release_tcbへの実製品hookは入れない（全体のIRQ契約未解決）。
+
+統合patchを固定原典の一時コピーへ適用し、候補6ファイルとバイト一致を確認。hostでcompileするscheduler.cと共有headerは、実配置候補とバイト一致を毎回検査する。設定headerからON module/必須hookが現れ、OFFはdriverなしでlinkすることを検査。基準release比較と、実driver glue接続のfinish回帰をUBSan実行した。初回はnamespace変更を抽出差分検査が検出したため、許可差分を正式API名の1行へ更新して再回帰した。検査を除去していない。
+
+driver全体の対象compile、nonsectorの完全TU比較、CMake実行、正式H753構成は未実施。hostのdriver抽出fixtureと実OS対象実行は異なる。TCB寿命・全終了経路、scheduler private管理領域への出力alias契約、物理IDMA停止も残る。11/13実機正常書込読戻し復元成功は保持するが、そのBINと現在候補の同一性は未確認。
+
+check.py --repo <nuttx> がhost再実行入口。integrated-candidate.patchはレビュー用の未完成差分であり適用許可やflash手順ではない。実機操作・製品マージなし。
