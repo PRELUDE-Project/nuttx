@@ -1,0 +1,18 @@
+# TCB解放時の通知配置と排他条件
+
+固定原典: be86b5194ed8f88009c3f867bda71420a5b9d161。現行 PR HEAD 442bbe419f411cda124c8ada111e645999003de8 と照合し、runtime 変更なしの範囲で確認した。
+
+## 新たに確認した条件
+nxsched_release_tcb のコメントは割込み無効を前提としている。しかし nxtask_terminate の実装は、nxtask_exithook、leave_critical_section、sched_note_stop、nxsched_release_tcb の順に呼ぶ。したがって、共通解放関数に通知を置く際に「必ず呼出元が排他済み」と扱ってはいけない。leave_critical_section は元の状態を復元するので、実際に常にIRQ有効になると断言することもできない。
+
+nxtask_exit は別経路で直接 nxsched_release_tcb を呼び、呼出元criticalを要求する。共通解放本体では POSIX timer削除、PID解放、stack解放、group離脱、TCB解放へ進む。PID解放だけが内部でcriticalを取得しても、その後に通知を置けばPID再利用より遅くなる。
+
+## 候補への影響
+既存試案 recover_notices は recovery_lock_held を要求するホスト用契約であり、実OSの排他取得実装ではない。そのまま release_tcb に呼出しを足す変更は適用しない。
+
+解放直前のバックストップを設けるなら、PID解放より前の有効TCBに対し、独自の短いcritical内で登録の取り外しと固定通知を完結させる必要がある。先行recoverが通知済みならno-opとし、未初期化TCBの解放は登録一致がなければ触らない。これは設計候補であって実装済み保証ではない。restartはTCBを解放しないため、release側だけでは解決しない。早期recover側との両経路が必要である。
+
+次の実装条件は、固定通知呼出し中のwatchdog処理がこのcriticalで許容されること、選択した実構成でのTCB寿命、二重通知・登録解除の原子性、全呼出し経路と実OSリンクの確認。現段階で製品hook・所有権強制解放・IDMA再利用は追加していない。
+
+## 証拠の範囲
+3ファイルを固定GitHub原典から全文取得し、関数本体の順序を確認した。これは静的調査であり、実OS上の終了試験・ARM対象ビルド・物理停止の検証ではない。11/13の実機512 B書込読戻し復元成功とは別の未検証条件である。
