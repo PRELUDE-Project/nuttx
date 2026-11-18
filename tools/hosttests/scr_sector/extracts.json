@@ -1,0 +1,63 @@
+{
+  "driver": {
+    "scr_closed": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_denied": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_close_producers": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_seal": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_platform_qualified": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_arena_qualified": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_receive_size": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_scr_claim": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sector_claim": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_scr_finish": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "sector_output_overlaps": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sector_finish": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sendcmd": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_recvshortcrc": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_endwait": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_endtransfer": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sdmmc_interrupt": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_datadisable": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_dataconfig": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_dmarecvsetup": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "sdio_mediachange": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "sdio_wrprotect": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_finish_output_denied": "arch/arm/src/stm32h7/stm32_sdmmc.c"
+  },
+  "integration": {
+    "scr_closed": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_denied": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_close_producers": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_seal": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_platform_qualified": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_arena_qualified": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "scr_receive_size": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_scr_claim": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sector_claim": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_scr_finish": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "sector_output_overlaps": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sector_finish": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sendcmd": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_recvshortcrc": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_endwait": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_endtransfer": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_sdmmc_interrupt": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_datadisable": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_dataconfig": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "stm32_dmarecvsetup": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "sdio_mediachange": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "sdio_wrprotect": "arch/arm/src/stm32h7/stm32_sdmmc.c",
+    "mmcsd_sector_validate": "drivers/mmcsd/mmcsd_sdio.c",
+    "mmcsd_sector_readonce": "drivers/mmcsd/mmcsd_sdio.c",
+    "scr_finish_output_denied": "arch/arm/src/stm32h7/stm32_sdmmc.c"
+  },
+  "upper": {
+    "mmcsd_sector_validate": "drivers/mmcsd/mmcsd_sdio.c",
+    "mmcsd_sector_readonce": "drivers/mmcsd/mmcsd_sdio.c"
+  },
+  "cli": {
+    "sector_lba": "tools/diagnostics/scrdiag/app/scrdiag_main.c",
+    "scrdiag_main": "tools/diagnostics/scrdiag/app/scrdiag_main.c",
+    "sector_crc32": "tools/diagnostics/scrdiag/app/scrdiag_main.c"
+  }
+}

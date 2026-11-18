@@ -1,0 +1,9 @@
+# private registryへの出力重複拒否
+
+1458c7c7の統合候補で残っていたscheduler private head/dispatching領域への出力重複を検査する読み取り専用APIを追加。内部領域へのポインタを製品APIから公開せず、既知の静的領域との整数範囲比較だけを行う。0長・加算overflowは拒否する。driver finishのcopy前にbindingとの重複検査と併用した。
+
+実glue接続fixtureでhead/dispatchingを出力に指定する2条件を注入し、EINVAL、binding/登録枠/dispatch状態不変、隔離とcritical復元を確認する。host test accessorは試験にのみ存在し、対象ビルドに公開しない。原典/依存pin、同一OSmodule/header、診断ON/OFF、既存UBSan回帰を維持。
+
+全メモリ出力を安全にするAPIではない。TCBや呼出側管理領域等を含む任意ポインタの検証にはならず、trusted callerの出力契約が必要。正式H753設定・全driver ARMビルド・実OS寿命・物理停止は未確認。11/13実機正常書込読戻し復元成功とは別の未適用候補。実機操作なし。
+
+独立読取りレビューで指定構成のblockingなし。追加で512B sector出力と登録枠の重複、同じaliasを伴う既存ETIMEDOUTの保持を実finish経由で回帰した。claim側arena/key出力のaliasは別の未対応契約であり、全API管理領域保護とは扱わない。

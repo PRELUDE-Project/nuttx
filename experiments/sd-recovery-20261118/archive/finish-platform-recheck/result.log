@@ -1,0 +1,1 @@
+PASS 28 post-IRQ platform rechecks, valid revisions/cache-off copy exact size; invalid conditions quarantine before IDMA disable and cannot recover by restoring inputs. Host only.

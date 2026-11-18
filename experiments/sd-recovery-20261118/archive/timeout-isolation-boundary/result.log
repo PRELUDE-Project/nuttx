@@ -1,0 +1,1 @@
+PASS 1400 actual watchdog->endwait->seal cases: late IRQ/timer inert, IDMA left enabled, output preserved, same-boot claims rejected; MMIO/OS mocked

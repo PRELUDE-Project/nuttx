@@ -1,0 +1,11 @@
+# 実driverへの4 API glue候補
+
+remote aba2b69d の stm32_sdmmc.c blob affa479b1cfebd404dd880d7ffa19466a07457ba とローカル固定製品の一致を確認。別コピーでsector診断ONだけ既存4 APIをstatic raw helpersに分離し、同じ署名の登録/解除wrapperを追加した。sector内部SCR claimはrawへ直接接続して二重登録を避ける。fixedbindingは実g_sdmmcdev1、TCBは正式フィールドpid、scheduler private headを参照せずvalidate APIを使う。
+
+生成glueそのものをホストfixtureへ接続して、SCR成功→HANDOFF→sector移行、通知後finishのECANCELED・出力保持、コピー前登録欠落/世代不一致のEIO・隔離をUBSanで確認。初回はfixtureのpid_t宣言がglueより後でcompile拒否。host型宣言を前へ出して修正し、警告を無効化せず再試験成功。実製品headerではnxsched_get_tcbはnuttx/sched.hに宣言されている。
+
+実driver全体のARM compileはまだ行っていない。既存os-wiringパッチはvalidate API追加前なので、そのまま組合せ可能とは扱わない。namespace・ヘッダー・Make/CMakeを揃えた統合パッチ、非sector前処理比較、正式H753構成、実OSのTCB寿命と物理停止が残る。独立レビュー依頼中。ここは候補の保存であり製品実装へ適用していない。11/13実機成功のBINと現候補は同一性未確認、実機操作なし。
+
+check.py --repo <nuttx> がホスト回帰入口。connected.cは既存release比較、finish.cが生成driver glueの接続試験。stubsはhost専用。
+
+独立レビューで新bindingへの出力aliasを指摘された。bindingは既存controller外のためcopy前の明示拒否を追加し、bindingを出力先にしたSCR finishでEINVAL、管理領域byte不変、隔離を確認する。scheduler private registry等への出力aliasを含む全管理領域の契約整理はまだ残るため、これで全alias安全性が完了したとは扱わない。

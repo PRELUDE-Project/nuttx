@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+ifeq ($(CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW),y)
+CONFIGURED_APPS += $(APPDIR)/system/scrdiag
+endif

@@ -1,0 +1,9 @@
+# ARM共通・ARMv7-Mの終了入口監査
+
+固定be86b519のGitHubディレクトリ一覧から、arch/arm/src/commonとarmv7-mの全C/assemblyおよびMake.defs/CMakeLists、計61ファイルを取得して確認した。sources.jsonは閲覧対象全件とblob、終了symbolの位置。
+
+up_exit/nxtask_exit/_exit/SYS_exit/SYS__exitの実呼出・定義はcommon/arm_exit.cのup_exit定義とnxtask_exit呼出だけ。arm_forkの_exitは契約説明コメント。assemblyも括弧なしsymbol参照として調べた。armv7-m/Make.defsがcommon/Make.defsをincludeし、共通Make/CMakeがarm_exit.cを選ぶことを確認。未存在のarmv7-m/arm_exit.cを一度要求して404になった後、実際のcommon配置で調査した。
+
+この範囲では通常の_exit→exithook/recover→up_exit→nxtask_exit→直接releaseという既存通知挿入案を迂回する別arch入口は見つからなかった。全コードから直接up_exitが呼ばれないという証明ではない。stm32h7固有コード、boards、その他scheduler/driverと正式採用構成はこの61件の外。直接release関数へ無条件通知を追加する修正は行わない。
+
+原典取得・静的読取りであり、ARM/実OS/実機の終了試験ではない。実OS通知APIの分割リンク、全callerの契約、TCB寿命・物理IDMA停止・電源条件は引き続き未確認。

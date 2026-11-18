@@ -1,0 +1,35 @@
+[
+  {
+    "header": "nuttx/cache.h",
+    "returncode": 0,
+    "last_error_lines": [
+      ".. ${RECOVERY_ROOT}/nuttx/include/limits.h",
+      "... ${RECOVERY_ROOT}/exit-cache-preprocess/nuttx/config.h",
+      "... ${RECOVERY_ROOT}/exit-cache-preprocess/arch/limits.h",
+      ". ${RECOVERY_ROOT}/nuttx/include/sys/types.h",
+      ".. ${RECOVERY_ROOT}/exit-cache-preprocess/nuttx/config.h"
+    ]
+  },
+  {
+    "header": "nuttx/atexit.h",
+    "returncode": 0,
+    "last_error_lines": [
+      ".... ${RECOVERY_ROOT}/exit-cache-preprocess/arch/limits.h",
+      ". ${RECOVERY_ROOT}/nuttx/include/stdlib.h",
+      ".. ${RECOVERY_ROOT}/exit-cache-preprocess/nuttx/config.h",
+      ".. ${RECOVERY_ROOT}/nuttx/include/sys/types.h",
+      "... ${RECOVERY_ROOT}/exit-cache-preprocess/nuttx/config.h"
+    ]
+  },
+  {
+    "header": "nuttx/wqueue.h",
+    "returncode": 0,
+    "last_error_lines": [
+      "..... ${RECOVERY_ROOT}/nuttx/include/alloca.h",
+      ". ${RECOVERY_ROOT}/nuttx/include/nuttx/list.h",
+      ". ${RECOVERY_ROOT}/nuttx/include/nuttx/wdog.h",
+      ".. ${RECOVERY_ROOT}/exit-cache-preprocess/nuttx/config.h",
+      ".. ${RECOVERY_ROOT}/nuttx/include/errno.h"
+    ]
+  }
+]

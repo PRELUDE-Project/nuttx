@@ -1,0 +1,1 @@
+PASS: actual work_qcancel returns after first matching worker, second remains active; 1000 iterations

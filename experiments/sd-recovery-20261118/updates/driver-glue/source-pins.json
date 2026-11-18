@@ -1,0 +1,14 @@
+[
+  {
+    "path": "include/nuttx/scr_lease_review.h",
+    "sha": "165fc50c187891041ce3aa8241bf27be72cbadc0"
+  },
+  {
+    "path": "tools/hosttests/scr_sector/stubs/nuttx/config.h",
+    "sha": "03e31f1e6dbafba84571cc95f2c301b3a7662193"
+  },
+  {
+    "path": "tools/hosttests/scr_sector/actual-command-constants.h",
+    "sha": "faf789f31bd9732ef802b1c429d949dd437996d9"
+  }
+]

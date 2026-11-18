@@ -1,0 +1,14 @@
+[
+  {
+    "sector": 0,
+    "invocations": 10000,
+    "result": "PASS",
+    "kind": "actual extracted callback; queue/IRQ doubles, serial dispatch, not real workers"
+  },
+  {
+    "sector": 1,
+    "invocations": 10000,
+    "result": "PASS",
+    "kind": "actual extracted callback; queue/IRQ doubles, serial dispatch, not real workers"
+  }
+]

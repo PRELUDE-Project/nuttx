@@ -1,0 +1,19 @@
+# 隔離arenaの再利用とreset境界
+
+対象はnuttx固定627d0ec。lower全体とscr_lease_review.h、stm32_start.cを追跡した。製品変更なし。
+
+実timeoutから隔離したSCR/sectorそれぞれに、所有者1/別所有者2で、全65536種類の16bit command、NULL/自己arena/SDMMC1・2の別arena/rxfifo/通常受信bufferと6サイズ(0,1,8,32,512,513)のDMA setup、response読取りを実関数で試した。262292受付試行が拒否され、device構造体（arenaを含む）・MMIO配列が不変、response出力も不変。UBSan成功。run.py/test.c/result.logを保存。前回fixture生成元対応検査済みのdriverと実eventtimeoutを利用。MMIO/OSはdoubleで実デバイス間のDMA干渉試験ではない。
+
+静的照合:
+- scr_lease_beginはIDLE以外を拒否。fault/retire/endにIDLEへ戻す処理なし。lowerにscrleaseをmemsetする処理なし。
+- scr_closedがQUARANTINED/RETIRED/HANDOFFを閉じ、sendcmd/recvとsetupが拒否する。sector診断の送信setupはENOTSUPで常時拒否。
+- stm32_resetはcritical section内で非IDLEを最初に拒否し、RCC reset/power cycle/defaultへの到達前にreturn。sdio_initializeはSDMMC1/2とも非IDLEをGPIO設定前に拒否。今回reset/initialize全体の実行試験は追加しておらず、これらは静的根拠。
+- scr_finishとsector_finishは両controller arenaへの出力aliasを拒否。snapshotはtrusted caller前提の観測用であり、悪意あるkernel callerによる任意memory破壊の防御ではない。
+- 同一bootのarenaは静的controller構造体に属し、隔離後の再利用を許していない。無条件IDMAEN解除や強制解放を修正として追加する理由は今回見つからなかった。
+
+重要な範囲外:
+ソフトウェアのstm32_reset拒否と、CPU/システムのresetは別。stm32_start.cはBSS zeroとDATA copyをstm32_clockconfigより前に行う。g_sdmmcdevは初期化済み静的構造体なので、新しいbootではruntime lease状態を保持する根拠はない。以前のDMAが存続し得るreset種別に対して、同一bootの拒否ガードは保護を提供しない。これは『resetすれば安全に再試行できる』根拠にならない。デバッグreset・再flash・warm bootも許可せず、正式なresetドメイン/電源・物理DMA停止確認が必要。起動電源条件の既報HOLDも継続。
+
+本試験で物理停止・実ARM・実機間のバス独立性を証明していない。正式H753 SD configと対象ビルドは未完。公開・ハード操作・不明操作の再送なし。
+
+補足訂正: fault/retire/endとは別にsector_claimは成功SCRのHANDOFFを一度だけIDLEへ遷移させ、再claimを試みる。QUARANTINED/RETIREDからは進めない。「IDLEへ戻す処理が一切ない」という要約は不正確。新規handoff-failure-boundaryでこの例外を検証する。

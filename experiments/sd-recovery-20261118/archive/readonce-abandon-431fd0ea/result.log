@@ -1,0 +1,1 @@
+PASS 12 actual readonce reentry/abandon models: admission stays consumed, nested and later calls cannot reach lower hooks. No OS task deletion or DMA proof.

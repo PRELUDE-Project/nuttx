@@ -272,6 +272,11 @@
 
 /* SDMMC definitions ********************************************************/
 
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* Fixed-card diagnostic: select PLL1Q explicitly, not inherited state. */
+#  define STM32_RCC_D1CCIPR_SDMMCSEL RCC_D1CCIPR_SDMMC_PLL1
+#endif
+
 /* Init 400kHz, PLL1Q/(2*250) */
 
 #define STM32_SDMMC_INIT_CLKDIV     (250 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
@@ -468,4 +473,14 @@ extern "C"
 #endif
 
 #endif /* __ASSEMBLY__ */
+#ifdef CONFIG_SD_SECTOR_READ_REVIEW
+/* Fixed-card diagnostic pin selection; physical wiring remains unverified. */
+#  define GPIO_SDMMC1_D0 GPIO_SDMMC1_D0_0
+#  define GPIO_SDMMC1_D1 GPIO_SDMMC1_D1_0
+#  define GPIO_SDMMC1_D2 GPIO_SDMMC1_D2_0
+#  define GPIO_SDMMC1_D3 GPIO_SDMMC1_D3_0
+#  define GPIO_SDMMC1_CK GPIO_SDMMC1_CK_0
+#  define GPIO_SDMMC1_CMD GPIO_SDMMC1_CMD_0
+#endif
+
 #endif /* __BOARDS_ARM_STM32H7_NUCLEO_H743ZI2_INCLUDE_BOARD_H */

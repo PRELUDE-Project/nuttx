@@ -1,0 +1,74 @@
+[
+  {
+    "sector": false,
+    "flag": null,
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": false,
+    "flag": "CONFIG_SMP",
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": false,
+    "flag": "CONFIG_ARCH_HIPRI_INTERRUPT",
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": false,
+    "flag": "CONFIG_SCHED_TICKLESS",
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": false,
+    "flag": "CONFIG_SCHED_INSTRUMENTATION",
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": false,
+    "flag": "CONFIG_IRQCOUNT",
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": true,
+    "flag": null,
+    "expected_reject": false,
+    "exit": 0
+  },
+  {
+    "sector": true,
+    "flag": "CONFIG_SMP",
+    "expected_reject": true,
+    "exit": 1
+  },
+  {
+    "sector": true,
+    "flag": "CONFIG_ARCH_HIPRI_INTERRUPT",
+    "expected_reject": true,
+    "exit": 1
+  },
+  {
+    "sector": true,
+    "flag": "CONFIG_SCHED_TICKLESS",
+    "expected_reject": true,
+    "exit": 1
+  },
+  {
+    "sector": true,
+    "flag": "CONFIG_SCHED_INSTRUMENTATION",
+    "expected_reject": true,
+    "exit": 1
+  },
+  {
+    "sector": true,
+    "flag": "CONFIG_IRQCOUNT",
+    "expected_reject": true,
+    "exit": 1
+  }
+]

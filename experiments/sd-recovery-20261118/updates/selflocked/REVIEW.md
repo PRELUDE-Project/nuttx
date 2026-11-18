@@ -1,0 +1,9 @@
+# 自己排他の終了通知候補
+
+release_tcb呼出元が常にcritical内とは限らないため、recover_noticesを内部locked関数とenter/leave_critical_section wrapperに分けた。実NuttX APIの名称を使うが、本試験の実体はホストIRQ深さ模型である。
+
+既存の実driver抽出fixtureを再利用し、nested.cは外側criticalからのrecover、その後の重複通知、unlocked.cは外側criticalなしの通知と重複通知を検査する。どちらも通知中再入を含み、元errno ECANCELED、呼出元出力保持、QUARANTINED、登録解除、critical深さ復元をUBSanで確認した。
+
+再実行: python3 check.py --repo <対象nuttxチェックアウト>。既存cc/Pythonのみ、一時バイナリ生成。独立読取りレビューで限定設計のblockingなし。指摘された通知回数1の直接assertと、NULL/別owner時の登録保持・元排他深さ復元（外側排他あり/なし）を両fixtureへ追加し、再回帰成功。レビュー自体は実行を含まない。
+
+製品には未適用。release/recoverの実OSへの呼出し追加、targetリンク、restartと外部deleteの実OSスケジューリング、物理IDMA停止の証拠ではない。11/13の既存実機512B書込読戻し復元成功とは別の候補評価である。重複通知でbuffer再利用や強制解放は行わない。

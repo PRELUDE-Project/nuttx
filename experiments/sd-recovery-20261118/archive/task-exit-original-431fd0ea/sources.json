@@ -1,0 +1,42 @@
+[
+  {
+    "path": "sched/task/task_delete.c",
+    "sha": "1ccfe637414e69cf9eb635e0a650a8ea1a29ba72",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/task/task_delete.c"
+  },
+  {
+    "path": "sched/task/task_terminate.c",
+    "sha": "05c2810707c147ec618db01edf831f86d11ad49f",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/task/task_terminate.c"
+  },
+  {
+    "path": "sched/task/task_exithook.c",
+    "sha": "268931b247df144490655cf966f1026e94ddcce0",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/task/task_exithook.c"
+  },
+  {
+    "path": "sched/task/task_recover.c",
+    "sha": "60bacf10494f88431e31e48c2dc6b2d69eface04",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/task/task_recover.c"
+  },
+  {
+    "path": "sched/pthread/pthread_cancel.c",
+    "sha": "aa631d984c69f897749fefcaa54400cacdfd4f91",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/pthread/pthread_cancel.c"
+  },
+  {
+    "path": "sched/task/task_cancelpt.c",
+    "sha": "04733fe4e9d888f46320cb449b3bb4a801425047",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/task/task_cancelpt.c"
+  },
+  {
+    "path": "sched/wdog/wd_recover.c",
+    "sha": "8c1db1db67a3f429a08c57b025d3ddcc89574afa",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/wdog/wd_recover.c"
+  },
+  {
+    "path": "sched/semaphore/sem_recover.c",
+    "sha": "c823d6dbca6ce07b32a929ab9d578e5dcc58efc1",
+    "display_url": "https://github.com/PRELUDE-Project/nuttx/blob/431fd0ea0f2a4f9a178fa46d9a53c46235a2433f/sched/semaphore/sem_recover.c"
+  }
+]

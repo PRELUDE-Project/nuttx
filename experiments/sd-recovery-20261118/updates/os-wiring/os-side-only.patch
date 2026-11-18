@@ -1,0 +1,131 @@
+--- /dev/null
++++ b/include/nuttx/sd_recovery_notice.h
+@@ -0,0 +1,27 @@
++#ifndef __INCLUDE_NUTTX_SD_RECOVERY_NOTICE_H
++#define __INCLUDE_NUTTX_SD_RECOVERY_NOTICE_H
++#include <nuttx/config.h>
++#include <stdint.h>
++#include <stdbool.h>
++struct tcb_s;
++#ifdef CONFIG_SD_SECTOR_READ_REVIEW
++#if !defined(CONFIG_ARCH_CHIP_STM32H7) || !defined(CONFIG_STM32H7_SDMMC1) || !defined(CONFIG_STM32H7_SDMMC_IDMA) || !defined(CONFIG_SD_SCR_CONTAINMENT_REVIEW) || !defined(CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW)
++#error "Missing required fixed diagnostic driver configuration"
++#endif
++#if defined(CONFIG_STM32H7_SDMMC2) || defined(CONFIG_SMP) || defined(CONFIG_ARCH_HIPRI_INTERRUPT) || defined(CONFIG_SCHED_TICKLESS) || defined(CONFIG_SCHED_INSTRUMENTATION) || defined(CONFIG_IRQCOUNT)
++#error "Unsupported fixed diagnostic recovery configuration"
++#endif
++
++struct nxsched_sd_notice {struct tcb_s *owner;uint64_t generation;};
++int nxsched_sd_bind_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
++int nxsched_sd_unbind_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
++void nxsched_sd_recover_notices(struct tcb_s*);
++#ifdef HOST_RECOVERY_TEST
++struct nxsched_sd_notice **recovery_slot_for_test(void);
++bool *recovery_dispatch_for_test(void);
++#endif
++#else
++/* No diagnostic exists: do not introduce a driver link dependency. */
++static inline void nxsched_sd_recover_notices(struct tcb_s *owner){(void)owner;}
++#endif
++#endif
+--- a/sched/task/CMakeLists.txt
++++ b/sched/task/CMakeLists.txt
+@@ -60,4 +60,8 @@
+   endif()
+ endif()
+ 
++if(CONFIG_SD_SECTOR_READ_REVIEW)
++  list(APPEND SRCS task_sd_recovery.c)
++endif()
++
+ target_sources(sched PRIVATE ${SRCS})
+--- a/sched/task/Make.defs
++++ b/sched/task/Make.defs
+@@ -48,3 +48,7 @@
+ 
+ DEPPATH += --dep-path task
+ VPATH += :task
++
++ifeq ($(CONFIG_SD_SECTOR_READ_REVIEW),y)
++CSRCS += task_sd_recovery.c
++endif
+--- a/sched/task/task_recover.c
++++ b/sched/task/task_recover.c
+@@ -31,6 +31,7 @@
+ #include <nuttx/arch.h>
+ #include <nuttx/wdog.h>
+ #include <nuttx/sched.h>
++#include <nuttx/sd_recovery_notice.h>
+ 
+ #include "semaphore/semaphore.h"
+ #include "wdog/wdog.h"
+@@ -64,6 +65,7 @@
+ 
+ void nxtask_recover(FAR struct tcb_s *tcb)
+ {
++  nxsched_sd_recover_notices(tcb);
+ #if !defined(CONFIG_DISABLE_PTHREAD) && !defined(CONFIG_PTHREAD_MUTEX_UNSAFE)
+   /* Recover any mutexes still held by the canceled thread */
+ 
+--- /dev/null
++++ b/sched/task/task_sd_recovery.c
+@@ -0,0 +1,59 @@
++#include <nuttx/sd_recovery_notice.h>
++#ifdef CONFIG_SD_SECTOR_READ_REVIEW
++#include <debug.h>
++#include <nuttx/irq.h>
++#include <errno.h>
++#include <stddef.h>
++/* Diagnostic-only single-controller slot: no caller-supplied callback. */
++
++static struct nxsched_sd_notice *head;
++static bool dispatching;
++extern struct nxsched_sd_notice *sd_recovery_node(void);
++extern void sd_recovery_notify(uint64_t generation);
++static int bind_notice_locked(struct nxsched_sd_notice*n,struct tcb_s*owner,uint64_t gen){
++ if(n!=sd_recovery_node() || !owner || !gen)return -EINVAL;
++ if(dispatching || head)return -EBUSY;
++ n->owner=owner;n->generation=gen;head=n;return 0;
++}
++static int unbind_notice_locked(struct nxsched_sd_notice*n,struct tcb_s*owner,uint64_t gen){
++ if(n!=sd_recovery_node() || head!=n || n->owner!=owner || n->generation!=gen)return -ESTALE;
++ head=NULL;n->owner=NULL;return 0;
++}
++/* These internal locks protect the registry, not the caller's TCB lookup.
++ * Driver lookup/claim/bind and finish/unbind must retain one outer critical.
++ */
++int nxsched_sd_bind_notice(struct nxsched_sd_notice *n, struct tcb_s *owner, uint64_t generation)
++{
++ irqstate_t flags = enter_critical_section();
++ int ret = bind_notice_locked(n, owner, generation);
++ leave_critical_section(flags);
++ return ret;
++}
++int nxsched_sd_unbind_notice(struct nxsched_sd_notice *n, struct tcb_s *owner, uint64_t generation)
++{
++ irqstate_t flags = enter_critical_section();
++ int ret = unbind_notice_locked(n, owner, generation);
++ leave_critical_section(flags);
++ return ret;
++}
++static void recover_notices_locked(struct tcb_s*owner){
++ if(dispatching){DEBUGASSERT(head==NULL);return;}
++ if(!head || head->owner!=owner)return;
++ uint64_t generation=head->generation;
++ head->owner=NULL;head=NULL;
++ dispatching=true;sd_recovery_notify(generation);dispatching=false;
++}
++
++void nxsched_sd_recover_notices(struct tcb_s *owner)
++{
++ irqstate_t flags = enter_critical_section();
++ recover_notices_locked(owner);
++ leave_critical_section(flags);
++}
++
++#ifdef HOST_RECOVERY_TEST
++struct nxsched_sd_notice **recovery_slot_for_test(void){return &head;}
++bool *recovery_dispatch_for_test(void){return &dispatching;}
++#endif
++
++#endif

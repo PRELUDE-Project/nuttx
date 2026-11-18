@@ -1,0 +1,9 @@
+# 汎用通知をやめた固定SD診断通知案
+
+汎用bind APIにcaller指定callbackを渡せる設計では、SD callbackの調査だけで終了処理の再入を否定できない。そのため候補を単一controller専用に縮小した。任意callback引数・list次ポインタを削除し、唯一のstatic binding.notice以外の登録を拒否。recoverはowner一致時だけslotを先に解除し、固定sd_recovery_notifyを直接呼ぶ。この関数は実lease key一致とACTIVEを確認し、scr_seal(ECANCELED)のみ行う。保存済み原典で、この終了経路は指定構成のwd_cancelまででタスク終了APIを呼ばないことを確認済み。ただし将来の関数変更にも自動で保証されるものではない。
+
+host回帰は元の4export API名、実driver抽出、固定TCB lookupとrecover接続を使用。外国node拒否、正常SCR→HANDOFF、無効LBA・TCB欠落のerrno/出力保持、sector claim後recover→ECANCELED/出力保持をWerror+UBSan確認。notify回数・派生状態は既存モデルのまま。実OSの再入や削除が起きた実測ではない。
+
+固定OS側への挿入位置をintegration-location.patch、登録処理をfixed-notification-fragment.cに保存。これは適用可能な完成パッチではない。OS/archの分割header・symbol設計とリンク、実driver static bindingへの限定を製品全TUで保証する作業が残る。先行の構成gateに加え、controllerが一つであることをcompile gate化する必要がある。汎用callbackを受け付ける旧候補は採用しない。
+
+DEBUGASSERT(!dispatching)は残っているため、固定callbackのcallgraphと構成条件が製品で確定するまでは再入解消済みとしない。正式H753 config・ARM build・実OS全終了経路・物理停止・電源条件未確認。製品反映・実機操作・導入拒否の再送なし。

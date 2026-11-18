@@ -1,0 +1,15 @@
+{
+  "command": [
+    "cc",
+    "-E",
+    "-H",
+    "-nostdinc",
+    "-Isd-recovery-627d0ec/irq-priority-preprocess",
+    "-x",
+    "c",
+    "sd-recovery-627d0ec/nuttx/include/nuttx/net/net.h"
+  ],
+  "returncode": 0,
+  "kind": "host-preprocessor-reference-config-only",
+  "excluded_network_headers": true
+}

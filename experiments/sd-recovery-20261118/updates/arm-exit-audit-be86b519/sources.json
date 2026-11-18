@@ -1,0 +1,325 @@
+[
+  {
+    "path": "arch/arm/src/common/CMakeLists.txt",
+    "blob": "77cb13a4d06b902d885c6d09fdfac66502c28059",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/Make.defs",
+    "blob": "e11a42a84b8dd902ea3c81d150e4d4adbf523b33",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_allocateheap.c",
+    "blob": "f29b028441e576f8c11e4adf773c310ad995eaec",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_backtrace_fp.c",
+    "blob": "5254c2d5bcdf0f6d916fc7c17e7955a97bd59013",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_backtrace_sp.c",
+    "blob": "dad816e6fdcba703c16eb9ccc0ba94e8ad0b88d4",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_backtrace_unwind.c",
+    "blob": "7adc97cb339e865c6d8ac3f3c61e04c6b1eb4fdb",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_checkstack.c",
+    "blob": "c6618d0522fe1906ede10f125b22577ae8eaea9a",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_createstack.c",
+    "blob": "92d156bb1629c61fbc97a32a0eb9c2dd99b7dd36",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_exit.c",
+    "blob": "1f184e6bce66143342228e720b9e1b7e212d0311",
+    "lines": [
+      {
+        "line": 47,
+        "text": " * Name: up_exit"
+      },
+      {
+        "line": 57,
+        "text": "void up_exit(int status)"
+      },
+      {
+        "line": 61,
+        "text": "  nxtask_exit();"
+      }
+    ]
+  },
+  {
+    "path": "arch/arm/src/common/arm_fork.c",
+    "blob": "7a5a73e3668d2fcb5314cbf0a636cf5676d980f4",
+    "lines": [
+      {
+        "line": 56,
+        "text": " *   called, or calls any other function before successfully calling _exit()"
+      }
+    ]
+  },
+  {
+    "path": "arch/arm/src/common/arm_getintstack.c",
+    "blob": "2cdcf03c1141535938920b6894c357d975f13c8c",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_hostfs.c",
+    "blob": "b0bede45590b9b693ba30ba37cd926e29c82700b",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_idle.c",
+    "blob": "f453a182e1e51232054cb8101cd1a6395edccd99",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_initialize.c",
+    "blob": "c5c43507467346d45562934efc555e5a3fbf332f",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_lowputs.c",
+    "blob": "755266dd129d8c52b99f772dcb63277b4bb7e0ad",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_mdelay.c",
+    "blob": "26ec51255c73c8a4d0005493effaf4a78913f68e",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_modifyreg.c",
+    "blob": "c1818a7dc12bf54f88b21a2b557942dc267df6c2",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_nputs.c",
+    "blob": "6ec271db77cbff6e5b4290fde0859e89b3844226",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_poweroff.c",
+    "blob": "9481c464c95ecc508e720abcb47a7e42cb4cda9b",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_pthread_start.c",
+    "blob": "07fc2409bba7c6b8f0502256b1f8778efb03ee7b",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_registerdump.c",
+    "blob": "baacabfb1002338eb9f4be26db15bff3fc6048f6",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_releasestack.c",
+    "blob": "68fa9098d92aea40d340c5b7fbacc3b81221b410",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_semi_syslog.c",
+    "blob": "702dbe35daf416bb42567274d6cdaec79a11bddc",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_signal_dispatch.c",
+    "blob": "79ac0e05f108dbc20749e44243cf3c9bc17f693b",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_stackframe.c",
+    "blob": "0e802d150a5e3befa64e8a99e22e2c6a46b5bbdb",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_task_start.c",
+    "blob": "2359be2d2fa4bac3131ab40682f926e2f38af521",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_tls.c",
+    "blob": "e01cb51ca7684f934bb34ddc6f69b0e093302158",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_udelay.c",
+    "blob": "5baae6903e27a4775c959426c7646a023930d7ed",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/arm_usestack.c",
+    "blob": "b05a69d77a0880f7d44d4b092642494343f56c5d",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/common/crt0.c",
+    "blob": "ccdb94428ff29df0d4ca3a09230b1a28b66cd526",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/CMakeLists.txt",
+    "blob": "c8d415ea927bfb641311098b8e032579a3b54a99",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/Make.defs",
+    "blob": "8edd3e1ca9c01be2a0540510ff5f2e6a8a80c00f",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_busfault.c",
+    "blob": "e3de665770c53d0a2470d375578ab4714288e8f2",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_cache.c",
+    "blob": "c9894f96543240dce7c9da9bde4e843298f2f867",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_cpuinfo.c",
+    "blob": "973e420b5aaf0cf35e0d071f56227195333a4334",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_dbgmonitor.c",
+    "blob": "741feb9dc3e889212da5dc20185a588bc6879625",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_doirq.c",
+    "blob": "9dff88e5143ecd82bf0266854728159200c93ebc",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_dumpnvic.c",
+    "blob": "f721fcf30b75742d172f3bd3820aba8c763bc99d",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_exception.S",
+    "blob": "d209e4cf853e45195a9c5963ada727daf621c2e6",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_fpucmp.c",
+    "blob": "550f7b745533506f60061576a70bfef7377db55e",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_fpuconfig.c",
+    "blob": "df1549afd7d13ce217259b162e27dab8b18d88c3",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_hardfault.c",
+    "blob": "3c1c79c9fecd727194d1cf63e893fd5cd1f80fe7",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_initialstate.c",
+    "blob": "0cab69f30d883f6e0cd07ef964a08f90d8e85109",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_itm.c",
+    "blob": "77b9a1f962903524b99abea2137f31611818f314",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_itm_syslog.c",
+    "blob": "229eab144888274f79e6115eb4258d697330d16b",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_memfault.c",
+    "blob": "d2fff74a7c02cd646aa2b448c5bcc28b168ef950",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_mpu.c",
+    "blob": "1d3646cd2cf4cfb95d41629d4b72474e2410a35b",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_perf.c",
+    "blob": "28dd4f236e238c9f582dfd1aa6a3381f98e976c1",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_ramvec_attach.c",
+    "blob": "6f273ad7ec5487ed18938b49e9fa138ffcf96830",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_ramvec_initialize.c",
+    "blob": "eff782f36780d797ea812e617bb9bfef67718e9d",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_saveusercontext.S",
+    "blob": "52e2af3e31a0170832959c3b79013abf48a8ea37",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_schedulesigaction.c",
+    "blob": "ad430e44686abb505e206e02874577a6d97c9c77",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_sigdeliver.c",
+    "blob": "7dff72944b2b978ada6249d295c6f68a4599ea42",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_stackcheck.c",
+    "blob": "e3c290cbdd9c5ed479a13c5f71ccfeeb2d806d0c",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_svcall.c",
+    "blob": "a32ed4016504da18f920b025748324f326807589",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_systemreset.c",
+    "blob": "fae073d2404fd6283cd10b03fb721840fdf4091a",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_systick.c",
+    "blob": "eccdae96af6d99941db37b14b0e21bede33e8e8f",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_tcbinfo.c",
+    "blob": "663c519ffdfbd4bfe5c1915363ab872dc47947e6",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_trigger_irq.c",
+    "blob": "f8ae700afb7eb33200920753ef5607ec9010c2c3",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_usagefault.c",
+    "blob": "e603ad40556340200d5822352dcc435f53e0fb2c",
+    "lines": []
+  },
+  {
+    "path": "arch/arm/src/armv7-m/arm_vectors.c",
+    "blob": "2a2df2e238474c0646c84f43f59840fa0e02aeb4",
+    "lines": []
+  }
+]

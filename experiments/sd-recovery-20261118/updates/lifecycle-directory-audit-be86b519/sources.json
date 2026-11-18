@@ -1,0 +1,197 @@
+[
+  {
+    "path": "sched/task/exit.c",
+    "blob": "bf696bc82dbefd29d89dc9371791a906561723d6",
+    "lines": [
+      {
+        "line": 97,
+        "text": "  nxtask_exithook(tcb, status);"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_activate.c",
+    "blob": "5c71f9131b85ab54cf6443f76f584ec8f82e03c4",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_argvstr.c",
+    "blob": "2da02a7c3bdf9ec9291ec3cd500842e87ca600be",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_cancelpt.c",
+    "blob": "04733fe4e9d888f46320cb449b3bb4a801425047",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_create.c",
+    "blob": "3ad6130873f6182201848370f193dba0f89d4cfa",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_delete.c",
+    "blob": "1ccfe637414e69cf9eb635e0a650a8ea1a29ba72",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_execve.c",
+    "blob": "62265b07608ab0da08003b2970dcd73d232e4f57",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_exit.c",
+    "blob": "9a021849eba9ea5f4cc258799a7024bc95f80c53",
+    "lines": [
+      {
+        "line": 147,
+        "text": "  ret = nxsched_release_tcb(dtcb, dtcb->flags & TCB_FLAG_TTYPE_MASK);"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_exithook.c",
+    "blob": "268931b247df144490655cf966f1026e94ddcce0",
+    "lines": [
+      {
+        "line": 406,
+        "text": "void nxtask_exithook(FAR struct tcb_s *tcb, int status)"
+      },
+      {
+        "line": 419,
+        "text": "  /* Under certain conditions, nxtask_exithook() can be called multiple"
+      },
+      {
+        "line": 432,
+        "text": "  nxtask_recover(tcb);"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_fork.c",
+    "blob": "39dd755f40cf9ecfd647dc931f0c3a3328294bc4",
+    "lines": [
+      {
+        "line": 265,
+        "text": "  nxsched_release_tcb((FAR struct tcb_s *)child, ttype);"
+      },
+      {
+        "line": 353,
+        "text": "  nxsched_release_tcb((FAR struct tcb_s *)child,"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_getgroup.c",
+    "blob": "bd4a69a114beb9f1fcc07f724f1f07d01b881250",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_getpid.c",
+    "blob": "76c63e9fcbeb7681cec1c62825722410a1defd73",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_getppid.c",
+    "blob": "01a0e561662a161140c80698b6e8f6c613a48fec",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_gettid.c",
+    "blob": "3787de26494a4832ad3c05ec744a057361c5941f",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_init.c",
+    "blob": "0fa96f99727e6666ada6bf3d33928566da0aeb9e",
+    "lines": [
+      {
+        "line": 83,
+        "text": " *   nxsched_release_tcb() to free the TCB (which could be in most any"
+      },
+      {
+        "line": 262,
+        "text": "  nxsched_release_tcb((FAR struct tcb_s *)tcb,"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_join.c",
+    "blob": "0a2c5b7da187aa6712b9303af45c695c5c3c8566",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_posixspawn.c",
+    "blob": "adcdf1374353b55b00be8dc9a1e893a9d8010b01",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_prctl.c",
+    "blob": "4435e4eba4e1fea4fd72598e60606a598a0ac4e6",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_recover.c",
+    "blob": "60bacf10494f88431e31e48c2dc6b2d69eface04",
+    "lines": [
+      {
+        "line": 65,
+        "text": "void nxtask_recover(FAR struct tcb_s *tcb)"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_reparent.c",
+    "blob": "5cfe4a99d2634501bbe19ace304fd292e2f56e79",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_restart.c",
+    "blob": "aa794921405b7eb67befe9afc894e80b46c4c10d",
+    "lines": [
+      {
+        "line": 105,
+        "text": "  nxtask_recover(tcb);"
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_setup.c",
+    "blob": "7b893b4b3b8f5a6df9ec5efb161227784e9667bf",
+    "lines": [
+      {
+        "line": 366,
+        "text": "       * last thread exits (see nxsched_release_tcb())."
+      }
+    ]
+  },
+  {
+    "path": "sched/task/task_spawn.c",
+    "blob": "dd2bbf5c7b870630796a3834f4856f28d606e2da",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_spawnparms.c",
+    "blob": "3066b32a7dbc6784bfa5729c27181ae6942f1bf6",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_start.c",
+    "blob": "815b78bc064460c387ba65dbc187c92f95640029",
+    "lines": []
+  },
+  {
+    "path": "sched/task/task_terminate.c",
+    "blob": "05c2810707c147ec618db01edf831f86d11ad49f",
+    "lines": [
+      {
+        "line": 179,
+        "text": "  nxtask_exithook(dtcb, EXIT_SUCCESS);"
+      },
+      {
+        "line": 191,
+        "text": "  return nxsched_release_tcb(dtcb, dtcb->flags & TCB_FLAG_TTYPE_MASK);"
+      }
+    ]
+  }
+]

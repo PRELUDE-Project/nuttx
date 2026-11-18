@@ -1,0 +1,9 @@
+# 実attachの失敗伝播と隔離中の拒否
+
+対象PR HEADは627d0ecのまま。別担当へ本範囲を連絡し、製品stm32_attachを無変更で抽出。既存fixtureへ試験用nirqフィールドを追加し、irq_attach/up_enable_irqだけをdoubleとして接続した。MASK_RESET=0/ICR_ALLFLAGS=0x1fe00fffは固定hardwareヘッダーと照合。source/template対応検査とUBSanが成功した。
+
+IDLE/ACTIVE/HANDOFF/QUARANTINED/RETIRED × initializing false/true × irq_attach成功/EIO/ENOMEM の30例。非IDLEまたは初期化中はEBUSYで登録・NVIC enable・controller flag clearなし。許可されたIDLEで登録が失敗すれば元errnoを保持し、MMIOもenableも変更しない。正常登録ではcontroller maskとflagsをクリアしてからNVIC enableする順序をdouble内assertで確認した。全例でcritical sectionの退出とdevice構造体不変も確認。
+
+これはIRQ attach自体が失敗した後のsoftwareエラー伝播と、閉鎖したleaseに対してattachで割込みを再開しないという境界の試験。実OS irq_attach内部の副作用・実NVIC pending・割込み競合・MMIO orderingや物理IDMA停止を証明するものではない。製品修正を必要とする問題は再現しなかった。
+
+再現: python3 attach-error-boundary/run.py。test.c、試験専用driver.c、result.logを保存。対象ビルド・実機操作・追加導入・APT再試行なし。電源条件HOLDを維持。

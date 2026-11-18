@@ -1,0 +1,14 @@
+from pathlib import Path
+import subprocess
+b=Path(__file__).resolve().parent;r=b.parent/'scr-claim-null-guard/product';f=r/'tools/hosttests/scr_sector'
+text=r'''
+int main(void){void*m=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);assert(m!=MAP_FAILED);struct stm32_dev_s*p=m;uint8_t*arena;struct scr_lease_key first,second;uint32_t response,scr[2];uint8_t out[512];unsigned count=0;
+for(unsigned next=1;next<4;next++){
+fresh(p);assert(stm32_scr_claim(&p->dev,&arena,&first)==0);p->blocksize=8;assert(stm32_dmarecvsetup(&p->dev,arena,8)==0);assert(stm32_sendcmd(&p->dev,SD_CMD55,0x10000)==0);regs[9]=55;regs[10]=0;regs[0]=0;assert(stm32_recvshortcrc(&p->dev,SD_CMD55,&response)==0);assert(stm32_sendcmd(&p->dev,SD_ACMD51,0)==0);regs[9]=51;assert(stm32_recvshortcrc(&p->dev,SD_ACMD51,&response)==0);p->waitevents=SDIOWAIT_TRANSFERDONE;regs[0]=STM32_SDMMC_STA_DATAEND;regs[6]=0;regs[7]=8;regs[4]=STM32_SDMMC_DCTRL_DTDIR|STM32_SDMMC_DCTRL_8BYTES;assert(stm32_sdmmc_interrupt(0,NULL,p)==0);assert(stm32_scr_finish(&p->dev,first,0,scr)==0);assert(p->scrlease.state==SCR_LEASE_HANDOFF);
+current_owner=next;assert(stm32_sector_claim(&p->dev,1,4096,true,&arena,&second)==0);assert(second.owner==next&&second.generation==first.generation+1);memset(out,0xa5,sizeof(out));assert(stm32_sector_finish(&p->dev,first,-EIO,out)==-ESTALE);assert(p->scrlease.state==SCR_LEASE_ACTIVE&&p->scrlease.owner==next);if(next!=1){current_owner=1;assert(stm32_dmarecvsetup(&p->dev,arena,512)==-EBUSY);assert(stm32_sector_finish(&p->dev,second,-EIO,out)==-ESTALE);current_owner=next;}
+setup(p);command(p);p->waitevents=SDIOWAIT_TIMEOUT;stm32_endwait(p,SDIOWAIT_TIMEOUT);assert(stm32_sector_finish(&p->dev,second,-EBUSY,out)==-ETIMEDOUT);assert(p->scrlease.state==SCR_LEASE_QUARANTINED);for(unsigned i=0;i<512;i++)assert(out[i]==0xa5);assert(stm32_sector_claim(&p->dev,1,4096,true,&arena,&second)==-EBUSY);count++;
+}printf("PASS %u actual SCR handoff generations/owners, stale key and former-task rejection, new-owner timeout quarantine; host only\n",count);return 0;}
+'''
+(b/'test.c').write_text('#define main original_main\n#include "'+str(f/'driver.c')+'"\n#undef main\n'+text)
+subprocess.run(['cc','-std=c11','-Wno-pointer-to-int-cast','-fsanitize=undefined','-fno-sanitize-recover=all','-I'+str(f),'-I'+str(f/'stubs'),'-I'+str(r/'include/nuttx'),str(b/'test.c'),'-o',str(b/'test')],check=True)
+p=subprocess.run([str(b/'test')],capture_output=True,text=True);(b/'result.log').write_text(p.stdout+p.stderr);print(p.stdout+p.stderr);assert p.returncode==0
