@@ -25,6 +25,14 @@ unsupported=['CONFIG_STM32H7_SDMMC2','CONFIG_SMP','CONFIG_ARCH_HIPRI_INTERRUPT',
 flags=['-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-parameter','-Wno-unused-variable','-Wno-pointer-to-int-cast','-Wno-sign-compare']
 def defs(xs):return ['-D'+x+'=1' for x in xs]
 with tempfile.TemporaryDirectory() as tmp:
+ cfg=Path(tmp)/'include/nuttx';cfg.mkdir(parents=True)
+ (cfg/'config.h').write_text(''.join('#define '+x+' 1\n' for x in required))
+ obj=str(Path(tmp)/'scheduler.o')
+ subprocess.run(['cc',*flags,'-I'+str(cfg.parent),'-I'+str(p/'stubs'),'-c',str(p/'scheduler.c'),'-o',obj],check=True)
+ symbols=subprocess.run(['nm',obj],check=True,capture_output=True,text=True).stdout
+ assert ' T recover_notices' in symbols and ' U sd_recovery_notify' in symbols
+ assert 'recovery_lock_held' not in symbols and 'recovery_slot_for_test' not in symbols
+ print('PASS generated test config header without -D CONFIG; real module and mandatory hook present, no host-only lock API')
  for case in ['baseline','candidate']:
   out=str(Path(tmp)/case)
   subprocess.run(['cc',*(['-DPROPOSED_RELEASE_HOOK'] if case=='candidate' else []),*flags,*defs(required),'-DHOST_RECOVERY_TEST','-fsanitize=undefined','-fno-sanitize-recover=all','-I'+str(p/'stubs'),'-I'+str(f),'-I'+str(f/'stubs'),'-I'+str(r/'include/nuttx'),str(p/'scheduler.c'),str(p/'connected.c'),'-o',out],check=True)

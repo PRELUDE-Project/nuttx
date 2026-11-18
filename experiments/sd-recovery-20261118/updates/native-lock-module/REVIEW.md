@@ -5,3 +5,5 @@
 内部criticalが守るのは登録枠だけ。driverのTCB検索→claim→bind、finish→unbind全体の外側criticalは引き続き必要。既に無効化されたTCBを渡すことをこのモジュールだけで防ぐことはできない。
 
 実release本体接続のbaseline/candidate4条件ずつを同じ固定原典・3依存blob照合の後UBSan回帰する。TCB/IRQ/freeはhost stubであり、NuttX完全リンク・正式H753構成・実OSの全終了経路・物理IDMA停止を証明しない。現在はexperimentsの候補のみ、製品未統合。11/13の実機正常書込読戻し復元は別結果。
+
+独立レビューでconfigヘッダーを読まずhostの-D定義に依存する問題を発見した。共有ヘッダーにnuttx/config.hを追加し、個別-D CONFIGを使わず、一時生成のテスト用config.hだけでscheduler単体をcompileする回帰を追加した。nmでrecover_noticesの実装と必須sd_recovery_notify参照が存在し、host専用lock/test accessorがないことを検査する。この生成configは回帰用の最小マクロ集合で、正式採用H753設定ではない。

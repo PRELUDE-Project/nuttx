@@ -1,5 +1,6 @@
 #ifndef HOST_RECOVERY_SPLIT_H
 #define HOST_RECOVERY_SPLIT_H
+#include <nuttx/config.h>
 #include <stdint.h>
 #include <stdbool.h>
 struct tcb_s;
