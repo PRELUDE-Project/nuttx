@@ -1787,6 +1787,16 @@ int stm32_sector_finish(struct sdio_dev_s*dev,struct scr_lease_key key,int error
 
 int main(void){
  void*m=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);assert(m!=MAP_FAILED);target=m;
+ for(unsigned damage=0;damage<2;damage++){
+  struct tcb_s preowner={.pid=1};uint8_t *arena;struct scr_lease_key prekey={0};uint32_t guardout[2]={0xa5a5a5a5,0x5a5a5a5a};
+  fresh(target);head=NULL;dispatching=false;table[1]=&preowner;
+  assert(stm32_scr_claim(&target->dev,&arena,&prekey)==0);complete_scr();
+  if(damage)binding.notice.generation++;else head=NULL;
+  assert(stm32_scr_finish(&target->dev,prekey,0,guardout)==-EIO);
+  assert(guardout[0]==0xa5a5a5a5 && guardout[1]==0x5a5a5a5a);
+  assert(target->scrlease.state==SCR_LEASE_QUARANTINED && depth==0);
+ }
+
  struct tcb_s owner={.pid=1};uint8_t*a=(void*)0x1234;struct scr_lease_key k={0};uint32_t out[2];
  fresh(target);head=NULL;dispatching=false;table[1]=&owner;
  struct notice foreign={0};unsigned guard=enter_critical_section();

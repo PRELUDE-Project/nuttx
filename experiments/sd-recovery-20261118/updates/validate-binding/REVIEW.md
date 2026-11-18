@@ -5,3 +5,5 @@
 atomic_finishのコピー前検査をAPIへ置換。valid、generation違い、owner違い、foreign node、NULL node/owner、通知後未登録の拒否と、全ケースの元排他深さ・登録保持を追加し、実release本体接続baseline/candidate比較をUBSan実行する。登録を勝手に解除・復元せず、通知後の隔離を強制解除しない。
 
 製品未統合の候補。TCB ABI/IRQ/解放はhost模型。固定原典・依存SHA検査を維持。実OSの全終了経路・正式H753設定・ARMビルド・物理IDMA停止は未証明。11/13実機の正常書込読戻し復元成功とは別結果。
+
+独立読取りレビューで新たなblockingなし。指摘に基づきAPI宣言へ外側critical契約を追記し、実atomic_finishでhead欠落/notice generation不一致を注入する2条件を追加。新validate API経由でEIO、QUARANTINED、出力2word不変、critical復元を直接確認する。

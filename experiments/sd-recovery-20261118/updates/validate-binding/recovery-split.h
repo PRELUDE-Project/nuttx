@@ -15,6 +15,7 @@ struct tcb_s;
 struct notice {struct tcb_s *owner;uint64_t generation;};
 int bind_notice(struct notice*,struct tcb_s*,uint64_t);
 int unbind_notice(struct notice*,struct tcb_s*,uint64_t);
+/* Caller must keep lookup/validate/copy/unbind in one outer critical section. */
 int validate_notice(struct notice*,struct tcb_s*,uint64_t);
 void recover_notices(struct tcb_s*);
 #ifdef HOST_RECOVERY_TEST
