@@ -1,0 +1,11 @@
+# 実TCB解放本体へ自己排他通知を接続した比較
+
+基準 be86b5194ed8f88009c3f867bda71420a5b9d161 の sched/sched/sched_releasetcb.c（blob 52ce5f3159e3ddd9fd0fe29025a4b3c321415b86）から nxsched_release_tcb 本体を抽出。if(tcb)直後、PID解放より前に候補 recover_notices を条件付きで追加し、自己排他版schedulerと既存実driver抽出fixtureへ接続した。
+
+baseline/candidate各々で先行recoverあり/なし×外側criticalあり/なしの4条件をUBSan実行した。baselineの先行recoverなしでは、PID・stack・group・TCB解放の4観測点へACTIVE/登録残存が到達する。候補では全観測点前にQUARANTINED/登録解除、通知回数1、critical深さ復元を確認した。先行recoverありは両方通知1回であり、NULL TCBも副作用なし。
+
+先行recoverなしはバックストップの必要条件を調べる注入であって、通常の実OS経路でその漏れを発見したという意味ではない。解放関数の本体は実原典だが、PID/stack/group/freeは観測stub、TCB ABIとIRQは模型。PTHREAD/POSIX_TIMERS無効、PIC/addrenvなしの選択分岐のみ。restartは解放しないため、この候補だけでは対応できず早期recover通知が引き続き必要。
+
+実行: python3 check.py --repo <nuttx>。既存cc/Python/UBSanを使い一時バイナリのみ生成。generate-local.pyはローカル復旧ツリーからfixtureを生成した作業記録で、公開チェックアウトの再実行入口はcheck.py。初回は試験mainの曖昧インデントを-Werrorが拒否し、波括弧で修正後に再実行成功。検査を無効化していない。
+
+製品未適用、独立レビュー前。実OSでのTCB所有権・通知時点・全構成・ARMリンクとIDMA物理停止は未証明。11/13の実機書込読戻し復元成功とは別の候補試験。実機操作なし。
