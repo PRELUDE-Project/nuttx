@@ -65,7 +65,7 @@
                       int result, uint8_t output[512])
  {
    struct stm32_dev_s *priv = (struct stm32_dev_s *)dev;
-@@ -1320,6 +1333,81 @@
+@@ -1320,6 +1333,82 @@
    leave_critical_section(flags);
    return ret;
  }
@@ -110,8 +110,9 @@
 +  uintptr_t dst=(uintptr_t)out, base=(uintptr_t)&binding;
 +  size_t bytes=binding.dev->sector_mode?512:8;
 +  if(error>=0 && binding.dev->scrlease.state==SCR_LEASE_ACTIVE && out &&
-+     dst<=UINTPTR_MAX-(bytes-1) && dst<=base+sizeof(binding)-1 &&
-+     base<=dst+bytes-1){
++     (nxsched_sd_output_conflicts(dst,bytes) ||
++      (dst<=UINTPTR_MAX-(bytes-1) && dst<=base+sizeof(binding)-1 &&
++       base<=dst+bytes-1))){
 +    scr_seal(binding.dev,-EINVAL);leave_critical_section(flags);return -EINVAL;
 +  }
 +  int ret=binding.dev->sector_mode?raw_stm32_sector_finish(&binding.dev->dev,key,error,out):raw_stm32_scr_finish(&binding.dev->dev,key,error,out);
@@ -149,11 +150,12 @@
  
 --- /dev/null
 +++ b/include/nuttx/sd_recovery_notice.h
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,31 @@
 +#ifndef __INCLUDE_NUTTX_SD_RECOVERY_NOTICE_H
 +#define __INCLUDE_NUTTX_SD_RECOVERY_NOTICE_H
 +#include <nuttx/config.h>
 +#include <stdint.h>
++#include <stddef.h>
 +#include <stdbool.h>
 +struct tcb_s;
 +#ifdef CONFIG_SD_SECTOR_READ_REVIEW
@@ -169,6 +171,7 @@
 +int nxsched_sd_unbind_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
 +/* Caller must keep lookup/validate/copy/unbind in one outer critical section. */
 +int nxsched_sd_validate_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
++bool nxsched_sd_output_conflicts(uintptr_t address, size_t bytes);
 +void nxsched_sd_recover_notices(struct tcb_s*);
 +#ifdef HOST_RECOVERY_TEST
 +struct nxsched_sd_notice **recovery_slot_for_test(void);
@@ -220,7 +223,7 @@
  
 --- /dev/null
 +++ b/sched/task/task_sd_recovery.c
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,79 @@
 +#include <nuttx/sd_recovery_notice.h>
 +#ifdef CONFIG_SD_SECTOR_READ_REVIEW
 +#include <debug.h>
@@ -267,6 +270,17 @@
 +            n->owner == owner && n->generation == generation) ? 0 : -ESTALE;
 + leave_critical_section(flags);
 + return ret;
++}
++/* Reject overflow and overlap with private registry state without exposing it. */
++static bool sd_ranges_overlap(uintptr_t a, size_t n, uintptr_t b, size_t m)
++{
++ return a <= b + m - 1 && b <= a + n - 1;
++}
++bool nxsched_sd_output_conflicts(uintptr_t address, size_t bytes)
++{
++ if (bytes == 0 || address > UINTPTR_MAX - (bytes - 1)) return true;
++ return sd_ranges_overlap(address, bytes, (uintptr_t)&head, sizeof(head)) ||
++        sd_ranges_overlap(address, bytes, (uintptr_t)&dispatching, sizeof(dispatching));
 +}
 +static void recover_notices_locked(struct tcb_s*owner){
 + if(dispatching){DEBUGASSERT(head==NULL);return;}

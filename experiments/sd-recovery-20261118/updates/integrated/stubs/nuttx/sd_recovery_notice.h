@@ -2,6 +2,7 @@
 #define __INCLUDE_NUTTX_SD_RECOVERY_NOTICE_H
 #include <nuttx/config.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 struct tcb_s;
 #ifdef CONFIG_SD_SECTOR_READ_REVIEW
@@ -17,6 +18,7 @@ int nxsched_sd_bind_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
 int nxsched_sd_unbind_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
 /* Caller must keep lookup/validate/copy/unbind in one outer critical section. */
 int nxsched_sd_validate_notice(struct nxsched_sd_notice*,struct tcb_s*,uint64_t);
+bool nxsched_sd_output_conflicts(uintptr_t address, size_t bytes);
 void nxsched_sd_recover_notices(struct tcb_s*);
 #ifdef HOST_RECOVERY_TEST
 struct nxsched_sd_notice **recovery_slot_for_test(void);

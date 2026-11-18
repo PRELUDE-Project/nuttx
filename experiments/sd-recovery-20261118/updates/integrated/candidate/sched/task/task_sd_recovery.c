@@ -45,6 +45,17 @@ int nxsched_sd_validate_notice(struct nxsched_sd_notice *n, struct tcb_s *owner,
  leave_critical_section(flags);
  return ret;
 }
+/* Reject overflow and overlap with private registry state without exposing it. */
+static bool sd_ranges_overlap(uintptr_t a, size_t n, uintptr_t b, size_t m)
+{
+ return a <= b + m - 1 && b <= a + n - 1;
+}
+bool nxsched_sd_output_conflicts(uintptr_t address, size_t bytes)
+{
+ if (bytes == 0 || address > UINTPTR_MAX - (bytes - 1)) return true;
+ return sd_ranges_overlap(address, bytes, (uintptr_t)&head, sizeof(head)) ||
+        sd_ranges_overlap(address, bytes, (uintptr_t)&dispatching, sizeof(dispatching));
+}
 static void recover_notices_locked(struct tcb_s*owner){
  if(dispatching){DEBUGASSERT(head==NULL);return;}
  if(!head || head->owner!=owner)return;

@@ -1642,8 +1642,9 @@ static int atomic_finish(struct tcb_s*owner,struct scr_lease_key key,int error,v
   uintptr_t dst=(uintptr_t)out, base=(uintptr_t)&binding;
   size_t bytes=binding.dev->sector_mode?512:8;
   if(error>=0 && binding.dev->scrlease.state==SCR_LEASE_ACTIVE && out &&
-     dst<=UINTPTR_MAX-(bytes-1) && dst<=base+sizeof(binding)-1 &&
-     base<=dst+bytes-1){
+     (nxsched_sd_output_conflicts(dst,bytes) ||
+      (dst<=UINTPTR_MAX-(bytes-1) && dst<=base+sizeof(binding)-1 &&
+       base<=dst+bytes-1))){
     scr_seal(binding.dev,-EINVAL);leave_critical_section(flags);return -EINVAL;
   }
   int ret=binding.dev->sector_mode?raw_stm32_sector_finish(&binding.dev->dev,key,error,out):raw_stm32_scr_finish(&binding.dev->dev,key,error,out);
@@ -1808,6 +1809,34 @@ static int scoped_claim(bool sector,uint8_t**arena,struct scr_lease_key*key){
 
 int main(void){
  void*m=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);assert(m!=MAP_FAILED);target=m;
+ for(unsigned which=0;which<2;which++){
+  struct tcb_s aliasowner={.pid=1};uint8_t *arena;struct scr_lease_key aliaskey={0};
+  fresh(target);head=NULL;dispatching=false;table[1]=&aliasowner;
+  assert(stm32_scr_claim(&target->dev,&arena,&aliaskey)==0);complete_scr();
+  struct binding saved=binding;struct nxsched_sd_notice *savedhead=head;
+  uintptr_t dest=(uintptr_t)(which?(void*)recovery_dispatch_for_test():(void*)recovery_slot_for_test());
+  assert(nxsched_sd_output_conflicts(dest,8));
+  assert(stm32_scr_finish(&target->dev,aliaskey,0,(uint32_t*)dest)==-EINVAL);
+  assert(memcmp(&saved,&binding,sizeof binding)==0 && head==savedhead && !dispatching && depth==0);
+  assert(target->scrlease.state==SCR_LEASE_QUARANTINED);
+ }
+ for(unsigned negative=0;negative<2;negative++){
+  struct tcb_s sectorowner={.pid=1};uint8_t *arena;struct scr_lease_key key={0};uint32_t scr[2];
+  fresh(target);head=NULL;dispatching=false;table[1]=&sectorowner;
+  assert(stm32_scr_claim(&target->dev,&arena,&key)==0);complete_scr();
+  assert(stm32_scr_finish(&target->dev,key,0,scr)==0);
+  assert(stm32_sector_claim(&target->dev,0,4096,true,&arena,&key)==0);
+  struct binding saved=binding;struct nxsched_sd_notice *savedhead=head;
+  assert(stm32_sector_finish(&target->dev,key,negative?-ETIMEDOUT:0,(uint8_t*)recovery_slot_for_test())==(negative?-ETIMEDOUT:-EINVAL));
+  /* Error finish may unregister normally; it must not overwrite binding key. */
+  assert(binding.key.instance==saved.key.instance && binding.key.generation==saved.key.generation);
+  if(!negative)assert(head==savedhead && memcmp(&saved,&binding,sizeof binding)==0);
+  assert(!dispatching && target->scrlease.state==SCR_LEASE_QUARANTINED && depth==0);
+ }
+ assert(nxsched_sd_output_conflicts(UINTPTR_MAX-2,8));
+ assert(nxsched_sd_output_conflicts(1,0));
+ assert(!nxsched_sd_output_conflicts((uintptr_t)m,8));
+
  {
   struct tcb_s aliasowner={.pid=1};uint8_t *arena;struct scr_lease_key aliaskey={0};
   fresh(target);head=NULL;dispatching=false;table[1]=&aliasowner;
