@@ -1,0 +1,11 @@
+# 実NuttXへのOS側配線候補（未完成・製品未適用）
+
+基準はbe86b5194ed8f88009c3f867bda71420a5b9d161。実sched/taskのMake.defs、CMakeLists.txt、task_recover.cを取得し、自己排他通知module/headerを置く5ファイルのOS側パッチを生成した。APIはnxsched_sd_接頭辞で区別し、固定driver hook sd_recovery_node/notifyは必須の未解決参照として残す。weak no-opで未統合を隠さない。
+
+実MakeでCONFIG_SD_SECTOR_READ_REVIEW=n/yのソース選択を確認した。OFFではmoduleを追加せずヘッダーstub、ONではtask_sd_recovery.cを選択する。パッチを固定原典の一時コピーへ実適用し、候補5ファイルとのバイト一致を確認した。CMakeは未導入のため構文の静的照合だけで、CMake実行済みとは扱わない。新規導入はしていない。
+
+配置は早期nxtask_recover先頭。既存の通常終了・delete・restartが呼ぶrecoverへ通知を接続するための候補であり、これら実OS経路を今回実行したものではない。release_tcbへの追加は関数全体のIRQ契約が未整理のため、このパッチには入れていない。
+
+これはOS側だけの未完成パッチ。現行製品driverには通知hookもbind/unbindも存在しないため、そのまま製品へ適用しても診断ONの完全リンクは成立しない。driverのTCB検索からclaim/bind、finish/unbindまでの外側critical、実TCB寿命、全終了経路、正式H753設定とARMビルドが残る。実機の11/13正常書込読戻し復元成功とは別の未検証候補。物理IDMA停止を証明せず、隔離の強制解除も行わない。
+
+本ディレクトリは再現可能な設計差分の共有用であり、適用・マージ・フラッシュ手順ではない。
