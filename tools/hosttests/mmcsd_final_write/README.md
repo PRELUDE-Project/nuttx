@@ -7,7 +7,7 @@ The separate early CMD24-poll harness still owns pre-setup error propagation.
 
 Run from a checkout with Python 3 and a C compiler supporting UBSan:
 
-    python3 tools/hosttests/mmcsd_final_write/run.py
+    python3 -B tools/hosttests/mmcsd_final_write/run.py
 
 The runner requires the exact recorded driver/header bytes, extracts the actual
 mmcsd_writesingle, mmcsd_close, mmcsd_transferready and mmcsd_get_r1
@@ -41,3 +41,23 @@ retirement and source-buffer custody. A sector count, close or successful
 CMD13 cannot prove all four; none alone should publish a clean record. The test
 does not establish real timeout duration (individual calls are stubbed), safe
 retry, actual IDMA drain, power-loss persistence, or why old MCB data differed.
+
+## Proposed guard, exercised in a host fixture only
+
+The same runner also tests a source-derived prototype in a temporary
+translation unit. It changes no production driver, reserved storage, board
+profile, FAT behavior or physical configuration. All baseline tests still run.
+
+- An unsuccessful single-block data-event wait latches uncertainty in the
+  fixture's session state, preserves the exact first error, and rejects later
+  readiness or writes before any CMD13, partition switch or payload replay.
+  Closing a reference does not clear the latch.
+- A pending write only becomes card-ready once CMD13 reports both TRAN and
+  READY_FOR_DATA. TRAN without READY_FOR_DATA uses the same bounded polling
+  branch as PRG/RCV. The test models both later readiness and timeout.
+- The latch only covers the illustrated data-event boundary. It is not a
+  reliable complete owner/recovery state for the production driver, does not
+  stop IDMA or prove physical drain or persistence, and intentionally has no
+  clear or reset rule. Post-setup failures and multiple-block writes need a
+  separate proven lifecycle, as does safe association with a fixed card/session
+  and retained source buffer. Do not deploy this fixture or enable FAT from it.

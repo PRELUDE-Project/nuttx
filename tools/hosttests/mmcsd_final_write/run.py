@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from prototype import connected
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 
@@ -54,19 +56,24 @@ def main():
     with tempfile.TemporaryDirectory(prefix="mmcsd-final-write-") as tmp:
         work = Path(tmp)
         (work / "status-bits.h").write_text("\n".join(defines) + "\n")
-        (work / "actual.c.inc").write_text("\n\n".join(extracts) + "\n")
         mods = ("CONFIG_SDIO_DMA", "CONFIG_MMCSD_SDIOWAIT_WRCOMPLETE",
                 "CONFIG_MMCSD_CHECK_READY_STATUS_WITHOUT_SLEEP")
-        for cfg in itertools.product((False, True), repeat=len(mods)):
-            flags = [f"-D{name}" for name, value in zip(mods, cfg) if value]
-            exe = work / "case"
-            subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-g", "-Wall",
-                            "-Wextra", "-Werror", "-Wno-unused-function",
-                            "-Wno-unused-parameter", "-fsanitize=undefined",
-                            "-fno-sanitize-recover=all", *flags, "-I", tmp,
-                            str(HERE / "test.c"), "-o", str(exe)], check=True)
-            subprocess.run([str(exe)], check=True)
-    print("PASS 8 configurations: final write, close and CMD13 readiness; no hardware")
+        for proposed in (False, True):
+            source = connected(extracts) if proposed else extracts
+            (work / "actual.c.inc").write_text("\n\n".join(source) + "\n")
+            for cfg in itertools.product((False, True), repeat=len(mods)):
+                flags = [f"-D{name}" for name, value in zip(mods, cfg) if value]
+                if proposed:
+                    flags.append("-DCANDIDATE")
+                exe = work / "case"
+                subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-g", "-Wall",
+                                "-Wextra", "-Werror", "-Wno-unused-function",
+                                "-Wno-unused-parameter", "-fsanitize=undefined",
+                                "-fno-sanitize-recover=all", *flags, "-I", tmp,
+                                str(HERE / "test.c"), "-o", str(exe)], check=True)
+                subprocess.run([str(exe)], check=True)
+            name = "host prototype" if proposed else "unmodified baseline"
+            print(f"PASS 8 configurations: {name}; no hardware")
 
 
 if __name__ == "__main__":

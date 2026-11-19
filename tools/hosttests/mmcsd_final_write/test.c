@@ -46,6 +46,9 @@ struct mmcsd_state_s
   uint16_t rca;
   void *dev;
   bool wrbusy, locked;
+#ifdef CANDIDATE
+  bool write_uncertain; /* fixture only */
+#endif
 };
 
 struct inode { void *i_private; };
@@ -244,12 +247,17 @@ static void delayed_ready(void)
   trace_count = 3;
   status_trace[1] = MMCSD_R1_STATE_RCV;
   status_trace[2] = MMCSD_R1_STATE_TRAN | MMCSD_R1_READYFORDATA;
+#ifdef CANDIDATE
+  trace_count = 4;
+  status_trace[2] = MMCSD_R1_STATE_TRAN; /* Not READY_FOR_DATA yet. */
+  status_trace[3] = MMCSD_R1_STATE_TRAN | MMCSD_R1_READYFORDATA;
+#endif
   /* The existing optional write-complete IRQ wait is advisory: even a
    * timeout falls through to an independently successful CMD13. */
   notice_result = -ETIMEDOUT;
   assert(mmcsd_transferready(&card) == OK);
-  assert(!card.wrbusy && writes == 1 && status_sent == 3 &&
-         status_received == 3 && ticks == 2);
+  assert(!card.wrbusy && writes == 1 && status_sent == trace_count &&
+         status_received == trace_count && ticks == trace_count - 1);
 #ifdef CONFIG_MMCSD_SDIOWAIT_WRCOMPLETE
   assert(wait_notice == 1);
 #else
@@ -257,18 +265,32 @@ static void delayed_ready(void)
 #endif
 }
 
-static void data_timeout_and_close_lock_error(void)
+static void data_failure_and_close_lock_error(int injected_error)
 {
   struct mmcsd_state_s card;
   reset_fixture();
   init_card(&card);
   struct inode inode = { card.part };
-  transfer_result = -ETIMEDOUT;
-  assert(mmcsd_writesingle(card.part, payload, 7) == -ETIMEDOUT);
+  transfer_result = injected_error;
+  assert(mmcsd_writesingle(card.part, payload, 7) == injected_error);
   assert(!card.wrbusy && writes == 1 && waits == 1 && !status_sent);
   /* Nonbusy here is initialization state, not a hardware-stop result.
    * Even the actual readiness helper returns via its no-pending fast path. */
+#ifdef CANDIDATE
+  assert(card.write_uncertain);
+  status_trace[0] = MMCSD_R1_STATE_TRAN | MMCSD_R1_READYFORDATA;
+  assert(mmcsd_transferready(&card) == -EIO && !status_sent);
+
+  /* Even the partition switch branch may not run after uncertainty. */
+  card.partnum = 1;
+  assert(mmcsd_writesingle(card.part, payload, 7) == -EIO);
+  assert(card.write_uncertain && writes == 1 && waits == 1 && !status_sent);
+  assert(mmcsd_close(&inode) == OK && card.crefs == 0 &&
+         card.write_uncertain && !status_sent);
+  card.crefs = 1; /* Reset reference counter only for independent lock test. */
+#else
   assert(mmcsd_transferready(&card) == OK && !status_sent);
+#endif
   lock_result = -EINTR;
   assert(mmcsd_close(&inode) == -EINTR);
   assert(card.crefs == 1 && !status_sent && !locked);
@@ -288,7 +310,14 @@ int main(void)
   status_after_write(-ENODEV, MMCSD_R1_STATE_TRAN, 0, 0, false);
   /* Characterize current code, not an acceptance rule for a new provider:
    * TRAN without READY_FOR_DATA is still treated as successful. */
+#ifdef CANDIDATE
+  status_after_write(-ETIMEDOUT, MMCSD_R1_STATE_TRAN, 0, 0, true);
+#else
   status_after_write(OK, MMCSD_R1_STATE_TRAN, 0, 0, true);
-  data_timeout_and_close_lock_error();
+#endif
+  status_after_write(OK, MMCSD_R1_STATE_TRAN | MMCSD_R1_READYFORDATA,
+                     0, 0, true);
+  data_failure_and_close_lock_error(-ETIMEDOUT);
+  data_failure_and_close_lock_error(-EILSEQ);
   return 0;
 }
