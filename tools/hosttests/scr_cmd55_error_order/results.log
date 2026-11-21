@@ -1,0 +1,12 @@
+affa479b1cfebd404dd880d7ffa19466a07457ba arch/arm/src/stm32h7/stm32_sdmmc.c
+cc659e003afd1ec1fd4fee3d7b1a0b807bdc4270 drivers/mmcsd/mmcsd_sdio.c
+165fc50c187891041ce3aa8241bf27be72cbadc0 include/nuttx/scr_lease_review.h
+443cb673fbcdf16b76d9e1617fa8e1b209796c7f tools/hosttests/scr_sector/driver.c
+faf789f31bd9732ef802b1c429d949dd437996d9 tools/hosttests/scr_sector/actual-command-constants.h
+03e31f1e6dbafba84571cc95f2c301b3a7662193 tools/hosttests/scr_sector/stubs/nuttx/config.h
+-O0
+DATA timeout before CMD55 send=-16 poll=0 cancel=-115 return=-110 saved=-110 wakes=1 detached=1 idma_model=1 reprobe=-EBUSY
+CMD55 poll EIO before cancellation send=0 poll=1 cancel=-115 return=-5 saved=-125 wakes=1 detached=1 idma_model=1 reprobe=-EBUSY
+-O2
+DATA timeout before CMD55 send=-16 poll=0 cancel=-115 return=-110 saved=-110 wakes=1 detached=1 idma_model=1 reprobe=-EBUSY
+CMD55 poll EIO before cancellation send=0 poll=1 cancel=-115 return=-5 saved=-125 wakes=1 detached=1 idma_model=1 reprobe=-EBUSY

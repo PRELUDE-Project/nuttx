@@ -1,0 +1,67 @@
+/* Added test only: fixed SCR upper composed with fixed lower fixture. */
+struct mmcsd_state_s { struct sdio_dev_s *dev; unsigned caps; uint16_t rca; };
+static int order_case, nsend, npoll, ncancel, cancel_rc, send_rc;
+static int mmcsd_setblocklen(struct mmcsd_state_s *p, unsigned n) { (void)p; assert(n==8); return OK; }
+static void bsetup(struct sdio_dev_s *d, unsigned bytes, unsigned count) {
+  assert(bytes==8 && count==1); ((struct stm32_dev_s *)d)->blocksize=bytes;
+}
+static void arm_boundary(struct sdio_dev_s *d, sdio_eventset_t ev, unsigned timeout) {
+  struct stm32_dev_s *p=(void *)d;
+  assert(timeout==100 && p->scrlease.state==SCR_LEASE_ACTIVE);
+  p->waitevents=ev; p->waitwdog=true;
+  if (order_case==1) stm32_eventtimeout((wdparm_t)p);
+}
+static int inject_send(struct sdio_dev_s*d,uint32_t c,uint32_t a) {
+  assert(++nsend==1 && c==SD_CMD55 && a==0x10000);
+  return send_rc=stm32_sendcmd(d,c,a);
+}
+static int inject_poll(struct sdio_dev_s*d,uint32_t c) {
+  (void)d; assert(++npoll==1 && c==SD_CMD55); return -EIO;
+}
+static int inject_cancel(struct sdio_dev_s*d) { ncancel++; return cancel_rc=stm32_cancel(d); }
+static int forbidden_pio(struct sdio_dev_s *d, uint8_t *b, size_t n) { (void)d;(void)b;(void)n;assert(false);return -EIO; }
+static int forbidden_response(struct mmcsd_state_s *p, uint32_t c) { (void)p;(void)c;assert(false);return -EIO; }
+static int forbidden_wait(struct mmcsd_state_s *p,unsigned e) { (void)p;(void)e;assert(false);return -EIO; }
+#undef SDIO_CAPS_DMASUPPORTED
+#define SDIO_CAPS_DMASUPPORTED 2
+#define CONFIG_SDIO_DMA
+#define SDIO_BLOCKSETUP bsetup
+#define SDIO_DMARECVSETUP stm32_dmarecvsetup
+#define SDIO_RECVSETUP forbidden_pio
+#define SDIO_WAITENABLE arm_boundary
+#define SDIO_SENDCMD inject_send
+#define SDIO_WAITRESPONSE inject_poll
+#define SDIO_CANCEL inject_cancel
+#define mmcsd_recv_r1 forbidden_response
+#define mmcsd_eventwait forbidden_wait
+
+@UPPER@
+
+int main(void) {
+  void *m=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+  assert(m!=MAP_FAILED);
+  struct stm32_dev_s *p=m;
+  for (order_case=1;order_case<=2;order_case++) {
+    fresh(p);
+    nsend=npoll=ncancel=cancel_rc=send_rc=notifications=0;
+    uint32_t out[2]={0x11223344u,0x55667788u};
+    struct mmcsd_state_s upper={.dev=&p->dev,.caps=SDIO_CAPS_DMASUPPORTED,.rca=1};
+    int rc=mmcsd_get_scr(&upper,out);
+    const bool timed=(order_case==1);
+    const int saved_before=p->scrlease.result;
+    assert(rc==(timed?-ETIMEDOUT:-EIO));
+    assert(saved_before==(timed?-ETIMEDOUT:-ECANCELED));
+    assert(send_rc==(timed?-EBUSY:0));
+    assert(nsend==1 && npoll==(timed?0:1) && ncancel==1 && cancel_rc==-EINPROGRESS);
+    assert(depth==0 && notifications==1 && !p->waitwdog && p->scrlease.state==SCR_LEASE_QUARANTINED);
+    assert(p->buffer==NULL && !p->waitmask && !p->xfrmask && !p->scrlease.cpu_destination);
+    assert(out[0]==0x11223344u && out[1]==0x55667788u && regs[5]==1);
+    struct scr_lease_key key;
+    uint8_t *arena;
+    assert(stm32_scr_claim(&p->dev,&arena,&key)==-EBUSY);
+    printf("%s send=%d poll=%d cancel=%d return=%d saved=%d wakes=%u detached=1 idma_model=1 reprobe=-EBUSY\n",
+      timed?"DATA timeout before CMD55":"CMD55 poll EIO before cancellation",
+      send_rc,npoll,cancel_rc,rc,saved_before,notifications);
+  }
+  assert(munmap(m,4096)==0);
+}
