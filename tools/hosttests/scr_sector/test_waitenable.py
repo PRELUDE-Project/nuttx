@@ -14,8 +14,8 @@ CASES = (
     (
         "waitenable_host.c",
         "waitenable.inc",
-        ((3740, 3857),),
-        "9ee353fb4bb849ca9d0917866d8b5f418044f2ad18ee77fc58a89036074ff1fa",
+        ((813, 869), (3740, 3857)),
+        "a704360a6f8ac8e55705d44471fa87b97ca9bb5dc3feabbb4fdaf35f723c3230",
     ),
     (
         "watchdog_terminal_host.c",
