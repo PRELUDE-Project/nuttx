@@ -1,0 +1,11 @@
+affa479b1cfebd404dd880d7ffa19466a07457ba arch/arm/src/stm32h7/stm32_sdmmc.c
+cc659e003afd1ec1fd4fee3d7b1a0b807bdc4270 drivers/mmcsd/mmcsd_sdio.c
+76dcf15c6c4922c97f7e5f3b1180b304506c1274 drivers/mmcsd/mmcsd_sdio.h
+165fc50c187891041ce3aa8241bf27be72cbadc0 include/nuttx/scr_lease_review.h
+443cb673fbcdf16b76d9e1617fa8e1b209796c7f tools/hosttests/scr_sector/driver.c
+faf789f31bd9732ef802b1c429d949dd437996d9 tools/hosttests/scr_sector/actual-command-constants.h
+03e31f1e6dbafba84571cc95f2c301b3a7662193 tools/hosttests/scr_sector/stubs/nuttx/config.h
+-O0
+CMD55 R1 OK; ACMD51 admitted, R1 error: send=2 poll=2 r1=2 cancel=-115 return=-5 saved=-125 wakes=1 late_DATAEND=no_commit idma_model=1 reclaim=-EBUSY
+-O2
+CMD55 R1 OK; ACMD51 admitted, R1 error: send=2 poll=2 r1=2 cancel=-115 return=-5 saved=-125 wakes=1 late_DATAEND=no_commit idma_model=1 reclaim=-EBUSY

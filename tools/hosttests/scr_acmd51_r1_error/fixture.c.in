@@ -1,0 +1,88 @@
+/* Fixed SCR regression: ACMD51 card status error after successful CMD55. */
+struct mmcsd_state_s { struct sdio_dev_s *dev; unsigned caps; uint16_t rca; bool locked; };
+static int nsend, npoll, nr1, ncancel, cancel_rc;
+static int mmcsd_setblocklen(struct mmcsd_state_s *p,unsigned n) { (void)p; assert(n==8); return OK; }
+static void bsetup(struct sdio_dev_s *d,unsigned bytes,unsigned count) {
+  assert(bytes==8 && count==1); ((struct stm32_dev_s *)d)->blocksize=bytes;
+}
+static void arm(struct sdio_dev_s *d,sdio_eventset_t ev,unsigned timeout) {
+  struct stm32_dev_s *p=(void *)d;
+  assert(timeout==100 && p->scrlease.state==SCR_LEASE_ACTIVE);
+  p->waitevents=ev; p->waitwdog=true;
+}
+static int send_model(struct sdio_dev_s *d,uint32_t cmd,uint32_t arg) {
+  struct stm32_dev_s *p=(void *)d;
+  ++nsend;
+  assert((nsend==1 && cmd==SD_CMD55 && arg==0x10000 && p->scr_phase==0) ||
+         (nsend==2 && cmd==SD_ACMD51 && arg==0 && p->scr_phase==2));
+  return stm32_sendcmd(d,cmd,arg);
+}
+static int poll_model(struct sdio_dev_s *d,uint32_t cmd) {
+  (void)d; ++npoll;
+  assert((npoll==1 && cmd==SD_CMD55) || (npoll==2 && cmd==SD_ACMD51));
+  return OK;
+}
+static int recv_r1_model(struct sdio_dev_s *d,uint32_t cmd,uint32_t *raw) {
+  struct stm32_dev_s *p=(void *)d;
+  ++nr1;
+  assert((nr1==1 && cmd==SD_CMD55 && p->scr_phase==1) ||
+         (nr1==2 && cmd==SD_ACMD51 && p->scr_phase==3));
+  regs[STM32_SDMMC_STA_OFFSET]=0;
+  regs[STM32_SDMMC_RESPCMD_OFFSET]=nr1==1?55:51;
+  regs[STM32_SDMMC_RESP1_OFFSET]=nr1==1?0:MMCSD_R1_ERROR;
+  int rc=stm32_recvshortcrc(d,cmd,raw);
+  assert(rc==OK && p->scr_phase==(nr1==1?2:4));
+  return rc;
+}
+static int cancel_model(struct sdio_dev_s *d) {
+  struct stm32_dev_s *p=(void *)d;
+  assert(++ncancel==1 && p->scr_phase==4);
+  return cancel_rc=stm32_cancel(d);
+}
+static int forbidden_pio(struct sdio_dev_s *d,uint8_t *b,size_t n) {
+  (void)d;(void)b;(void)n;assert(false);return -EIO;
+}
+static int forbidden_wait(struct mmcsd_state_s *p,unsigned e) {
+  (void)p;(void)e;assert(false);return -EIO;
+}
+#undef SDIO_CAPS_DMASUPPORTED
+#define SDIO_CAPS_DMASUPPORTED 2
+#define CONFIG_SDIO_DMA
+#define SDIO_BLOCKSETUP bsetup
+#define SDIO_DMARECVSETUP stm32_dmarecvsetup
+#define SDIO_RECVSETUP forbidden_pio
+#define SDIO_WAITENABLE arm
+#define SDIO_SENDCMD send_model
+#define SDIO_WAITRESPONSE poll_model
+#define SDIO_RECVR1 recv_r1_model
+#define SDIO_CANCEL cancel_model
+#define mmcsd_eventwait forbidden_wait
+
+@UPPER@
+
+int main(void) {
+  void *m=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+  assert(m!=MAP_FAILED);
+  struct stm32_dev_s *p=m;
+  fresh(p);
+  uint32_t out[2]={0x11223344u,0x55667788u};
+  struct mmcsd_state_s upper={.dev=&p->dev,.caps=SDIO_CAPS_DMASUPPORTED,.rca=1};
+  int rc=mmcsd_get_scr(&upper,out);
+  assert(rc==-EIO && p->scrlease.result==-ECANCELED && p->scrlease.state==SCR_LEASE_QUARANTINED);
+  assert(nsend==2 && npoll==2 && nr1==2 && ncancel==1 && cancel_rc==-EINPROGRESS);
+  assert(depth==0 && notifications==1 && !p->waitwdog);
+  assert(!p->buffer && !p->waitmask && !p->xfrmask && !p->scrlease.cpu_destination);
+  assert(!p->scr_success_seen && !p->scr_completed && regs[STM32_SDMMC_IDMACTRLR_OFFSET]==1);
+  assert(out[0]==0x11223344u && out[1]==0x55667788u);
+  regs[STM32_SDMMC_STA_OFFSET]=STM32_SDMMC_STA_DATAEND;
+  assert(stm32_sdmmc_interrupt(0,NULL,p)==0);
+  assert(!p->scr_success_seen && !p->scr_completed && notifications==1 && p->scrlease.result==-ECANCELED);
+  assert(p->scrlease.state==SCR_LEASE_QUARANTINED && regs[STM32_SDMMC_IDMACTRLR_OFFSET]==1);
+  assert(out[0]==0x11223344u && out[1]==0x55667788u);
+  struct scr_lease_key key;
+  uint8_t *arena;
+  assert(stm32_scr_claim(&p->dev,&arena,&key)==-EBUSY);
+  printf("CMD55 R1 OK; ACMD51 admitted, R1 error: send=%d poll=%d r1=%d cancel=%d return=%d saved=%d wakes=%u late_DATAEND=no_commit idma_model=1 reclaim=-EBUSY\n",
+    nsend,npoll,nr1,cancel_rc,rc,p->scrlease.result,notifications);
+  assert(munmap(m,4096)==0);
+}
