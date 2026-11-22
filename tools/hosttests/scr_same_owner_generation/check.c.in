@@ -1,0 +1,25 @@
+static bool check_previous;
+static struct scr_lease_key previous;
+static uint32_t *active_output;
+static unsigned checked;
+static void old_key_at_cmd55(struct stm32_dev_s *dev)
+{
+  struct stm32_dev_s before;
+  uintptr_t regs_before[sizeof(regs)/sizeof(regs[0])];
+  const unsigned posted=notifications, fences=barriers, irq_depth=depth;
+  uint32_t old_destination[2]={0x11223344,0x55667788};
+  assert(dev->scrlease.state==SCR_LEASE_ACTIVE && dev->scr_phase==0);
+  assert(dev->scrkey.instance==previous.instance && dev->scrkey.owner==previous.owner);
+  assert(dev->scrkey.generation==previous.generation+1);
+  assert(dev->waitwdog && dev->waitevents && dev->waitmask);
+  memcpy(&before,dev,sizeof before);
+  memcpy(regs_before,regs,sizeof regs_before);
+  assert(stm32_scr_finish(&dev->dev,previous,0,old_destination)==-ESTALE);
+  assert(stm32_scr_stop_status(&dev->dev,previous)==-ESTALE);
+  assert(memcmp(&before,dev,sizeof before)==0 &&
+         memcmp(regs_before,regs,sizeof regs_before)==0);
+  assert(notifications==posted && barriers==fences && depth==irq_depth);
+  assert(old_destination[0]==0x11223344 && old_destination[1]==0x55667788);
+  assert(active_output[0]==0x12345678 && active_output[1]==0x9abcdef0);
+  ++checked;
+}

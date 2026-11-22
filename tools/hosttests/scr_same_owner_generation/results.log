@@ -1,0 +1,8 @@
+PIN fc6e7b66bd35c39f40f3655a0ad6eca5f71693d5 tools/hosttests/scr_containment/snapshot.c
+PIN 301f576caf9410da7bd5c5258b3d737358402ed3 tools/hosttests/scr_containment/actual-command-constants.h
+PIN affa479b1cfebd404dd880d7ffa19466a07457ba arch/arm/src/stm32h7/stm32_sdmmc.c
+PIN 165fc50c187891041ce3aa8241bf27be72cbadc0 include/nuttx/scr_lease_review.h
+-O0
+SCR A->B: generation 1->2, stale finish/status=-ESTALE, active state unchanged, one B notification, distinct B payload
+-O2
+SCR A->B: generation 1->2, stale finish/status=-ESTALE, active state unchanged, one B notification, distinct B payload

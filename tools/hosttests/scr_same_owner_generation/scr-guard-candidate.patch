@@ -1,0 +1,15 @@
+--- a/arch/arm/src/stm32h7/stm32_sdmmc.c
++++ b/arch/arm/src/stm32h7/stm32_sdmmc.c
+@@ -1384,10 +1384,10 @@
+       result = scr_closed(priv) ? -EINPROGRESS : -EBUSY;
+     }
+   leave_critical_section(flags);
+   return result;
+-#endif
+-}
++}
++#endif
+ 
+ /****************************************************************************
+  * Name: stm32_setpwrctrl
+  *

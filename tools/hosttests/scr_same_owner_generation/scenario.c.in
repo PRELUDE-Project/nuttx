@@ -1,0 +1,30 @@
+int main(void)
+{
+  void *map=mmap((void*)0x24000000,4096,PROT_READ|PROT_WRITE,
+                 MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+  assert(map!=MAP_FAILED && (uintptr_t)map==0x24000000);
+  struct stm32_dev_s *dev=map;
+  observed=dev;
+  struct mmcsd_state_s u={.dev=&dev->dev,.caps=1,.rca=1};
+  uint32_t first[2]={0,0}, second[2]={0x12345678,0x9abcdef0};
+  assert(mmcsd_get_scr(&u,first)==0);
+  assert(first[0]==0x5a5a5a5a && first[1]==0x5a5a5a5a);
+  assert(dev->scrlease.state==SCR_LEASE_IDLE && dev->scrlease.owner==0 &&
+         !dev->scrlease.cpu_destination && !dev->waitwdog && !dev->waitevents &&
+         !dev->waitmask && !dev->xfrmask && !dev->buffer && regs[5]==0);
+  previous=dev->scrkey;
+  assert(previous.generation && previous.owner==current_owner);
+  unsigned posted=notifications;
+  active_output=second;
+  check_previous=true;
+  assert(mmcsd_get_scr(&u,second)==0);
+  assert(checked==1 && notifications==posted+1 && depth==0);
+  assert(second[0]==0xa6a6a6a6 && second[1]==0xa6a6a6a6);
+  assert(dev->scrlease.state==SCR_LEASE_IDLE && dev->scrlease.owner==0 &&
+         !dev->waitwdog && !dev->waitevents && !dev->waitmask && !dev->xfrmask &&
+         !dev->buffer && !dev->scrlease.cpu_destination && regs[5]==0);
+  assert(calls16==1 && calls55==2 && calls51==2);
+  printf("SCR A->B: generation %llu->%llu, stale finish/status=-ESTALE, active state unchanged, one B notification, distinct B payload\n",
+         (unsigned long long)previous.generation,(unsigned long long)dev->scrkey.generation);
+  assert(munmap(map,4096)==0);
+}
