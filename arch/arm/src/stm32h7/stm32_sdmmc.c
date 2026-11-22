@@ -1385,8 +1385,8 @@ int stm32_scr_stop_status(struct sdio_dev_s *dev, struct scr_lease_key key)
     }
   leave_critical_section(flags);
   return result;
-#endif
 }
+#endif
 
 /****************************************************************************
  * Name: stm32_setpwrctrl
