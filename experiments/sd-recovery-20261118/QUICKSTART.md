@@ -45,6 +45,16 @@ NuttX候補 `c1fb8bedc304eec12d063a2c5fe547b84bf28430` とNuttX Apps `8ff533beb3
 
 このビルドはSCR診断の比較検証用です。元の実機用設定を復元したものではなく、配線、起動時の電源条件、IDMAの停止、カードとの通信は確認していません。実機への書き込みやカード操作は行っていません。
 
+## SCRと1セクター読出しを含むH753ZI対象ビルド（2026-11-26 JST）
+
+SCR専用とは別の作業領域に、同じNuttX候補 `c1fb8bedc304eec12d063a2c5fe547b84bf28430`、Apps `8ff533beb37eeef1f288c467acd7c50b542464eb`、上記のボード定義2か所を展開しました。今度は参考設定の `CONFIG_SD_SECTOR_READ_REVIEW=y` を維持し、H753ZI向けにビルドしました。AppsはNuttXディレクトリーからの相対パス（`-a ../apps`）で指定しました。GCC 15.2.1とkconfig-frontendsの版はSCR専用ビルドと同じです。
+
+- ARM ELF32、エントリ `0x080002D9`。未定義シンボルは0件です。ELFには `scrdiag_main`、`mmcsd_scr_diagnostic`、`mmcsd_sector_readonce` が含まれます。IDMAとMMCSDの読取り専用設定は有効、D-cacheとFATは無効です。
+- `nuttx.bin`：136,356バイト、SHA-256 `ffbb1f27f83b76adb4770d2ea3f9f7504ab322cd1501052a583bdf8ae1742145`。
+- 生成した `.config` のSHA-256：`3842f9e12cedbcd098087d7c97652ad8688c2445a79bc85207ece833e85dd93c`。
+
+このビルドでは、SCR初期化後に指定した1セクターを読む診断コードまでリンクされます。カードから実際に読めることや、読出し失敗後にIDMAが停止していることを示す結果ではありません。書込みやファイルシステムの試験用ではなく、実機にファームウェアを書き込んだりカードを操作したりしていません。
+
 ## 配線を照合する際の資料
 
 NuttXの設定ではD0〜D3がPC8〜PC11、CKがPC12、CMDがPD2です。[STの評価ボードマニュアル UM2407 Rev.6](https://www.st.com/resource/en/user_manual/um2407-stm32h7-nucleo144-board-stmicroelectronics.pdf)の表19では、対応するCN8端子は順に2、4、6、8、10、12です。MorphoのCN12を使う場合、D0とD1はそれぞれSB14とSB15が閉じた個体でのみCN12につながります（表14）。試験に使うコネクターと導通は未確認です。カードが応答しない場合、ファームウェアだけを原因と判断しません。
