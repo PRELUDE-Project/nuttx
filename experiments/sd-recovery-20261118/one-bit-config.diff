@@ -1,0 +1,5 @@
+--- four-bit
++++ one-bit
+@@ -257 +257 @@
+-# CONFIG_SDMMC1_WIDTH_D1_ONLY is not set
++CONFIG_SDMMC1_WIDTH_D1_ONLY=y
