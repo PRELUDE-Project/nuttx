@@ -36,9 +36,10 @@ NuttX候補 `c1fb8bedc304eec12d063a2c5fe547b84bf28430` とNuttX Apps `8ff533beb3
 - SCR専用構成でセクター読出しを無効にすると、SDMMC1の端子定義まで外れていました。SCR専用でも同じ端子を初期化するため、定義が有効になる条件を診断の共通設定に合わせました。
 - 次に、ボードヘッダーに存在しないLEDの名称をユーザーLED処理が参照していたため、ヘッダーが定義する名称に合わせました。SDカードやバス制御の動作は変更していません。
 
-設定例は [保存済みの参考設定](archive/REFERENCE-SD-CONFIG/candidate.config) を別の作業領域にコピーし、`CONFIG_SD_SECTOR_READ_REVIEW` だけを無効にしました。H743ZI2由来のボード用 `scripts/Make.defs` を使い、`tools/diagnostics/scrdiag/app` の4ファイルを別のApps作業ツリーの `system/scrdiag` に配置して、`tools/configure.sh -l -a <Apps> <設定ディレクトリ>` と `make -j4` を実行しました。生成後の設定でH753ZI、SDMMC1、IDMA、SCR診断、読取り専用を確認し、D-cache、セクター読出しとマウントは無効です。
+設定例は [保存済みの参考設定](archive/REFERENCE-SD-CONFIG/candidate.config) を別の作業領域にコピーし、`CONFIG_SD_SECTOR_READ_REVIEW` だけを無効にしました。H743ZI2由来のボード用 `scripts/Make.defs` を使い、`tools/diagnostics/scrdiag/app` の4ファイルを別のApps作業ツリーの `system/scrdiag` に配置して、`tools/configure.sh -l -a <Apps> <設定ディレクトリ>` と `make -j4` を実行しました。生成後の設定でH753ZI、SDMMC1、IDMA、SCR診断、読取り専用を確認し、D-cacheと診断用のセクター読出しは無効です。ファイルシステム全体のマウント機能を無効にした構成ではありませんが、FATとNSHの `mount`／`umount` コマンドは無効です。
 
 - 結果：ARM ELF32、未解決シンボル0件。`scrdiag_main` と `mmcsd_scr_diagnostic` を含みます。
+- 対象ELFを逆アセンブルし、`scrdiag_main` が SDIO 初期化、メディア通知、`mmcsd_scr_diagnostic` の順に呼ぶことを確認しました。`mmcsd_sector_readonce` と `mmcsd_slotinitialize` は対象ELFにありません。この入口からはカードを初期化してSCRを読むところまでを試し、セクター読出しやファイルシステムのマウントを試しません。
 - `nuttx.bin`：133,588バイト。SHA-256 `67fbbb95c45aae109fe502c71b91cb9d88286fd7ed41119ca638bea165d33ab6`。
 - ELFのシンボルと型情報を照合し、SCR用の32バイト領域がAXI SRAMの `0x240004C0`〜`0x240004DF` にあり、先頭アドレスが32バイト境界にそろっていることを確認しました。これはリンク後の配置確認で、実機のIDMA動作を確認したものではありません。
 
