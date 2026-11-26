@@ -28,3 +28,17 @@ python3 experiments/sd-recovery-20261118/updates/configuration-link/check.py --r
 この手順からフラッシュ、カード書込み・消去、リセット、電源設定変更へ進まない。正式採用の H753 生成設定、ARM 対象ビルド、起動時の電源条件、配線・カード個体、物理 IDMA 停止と所有者終了の保証が未確認である。参考設定を正式設定の代用にしない。隔離済みバッファを停止完了の根拠なしに再利用しない。
 
 現行 PR は Draft。ホスト回帰の成功だけではマージ・実機開始の条件を満たさない。利用者が今できるのは、コードの閲覧、再現可能なホスト回帰、未解決条件のレビューである。
+
+## SCR専用のH753ZI対象ビルド（2026-11-26 JST）
+
+NuttX候補 `c1fb8bedc304eec12d063a2c5fe547b84bf28430` とNuttX Apps `8ff533beb37eeef1f288c467acd7c50b542464eb` を使いました。本コミットのボード定義2か所の修正を加え、Arm GNU 15.2.Rel1（GCC 15.2.1）とDebian kconfig-frontends-nox 4.11.0.1+dfsg-6で設定生成からリンクまで行いました。
+
+- SCR専用構成でセクター読出しを無効にすると、SDMMC1の端子定義まで外れていました。SCR専用でも同じ端子を初期化するため、定義が有効になる条件を診断の共通設定に合わせました。
+- 次に、ボードヘッダーに存在しないLEDの名称をユーザーLED処理が参照していたため、ヘッダーが定義する名称に合わせました。SDカードやバス制御の動作は変更していません。
+
+設定例は [保存済みの参考設定](archive/REFERENCE-SD-CONFIG/candidate.config) を別の作業領域にコピーし、`CONFIG_SD_SECTOR_READ_REVIEW` だけを無効にしました。H743ZI2由来のボード用 `scripts/Make.defs` を使い、`tools/diagnostics/scrdiag/app` の4ファイルを別のApps作業ツリーの `system/scrdiag` に配置して、`tools/configure.sh -l -a <Apps> <設定ディレクトリ>` と `make -j4` を実行しました。生成後の設定でH753ZI、SDMMC1、IDMA、SCR診断、読取り専用を確認し、D-cache、セクター読出しとマウントは無効です。
+
+- 結果：ARM ELF32、未解決シンボル0件。`scrdiag_main` と `mmcsd_scr_diagnostic` を含みます。
+- `nuttx.bin`：133,588バイト。SHA-256 `67fbbb95c45aae109fe502c71b91cb9d88286fd7ed41119ca638bea165d33ab6`。
+
+このビルドはSCR診断の比較検証用です。元の実機用設定を復元したものではなく、配線、起動時の電源条件、IDMAの停止、カードとの通信は確認していません。実機への書き込みやカード操作は行っていません。

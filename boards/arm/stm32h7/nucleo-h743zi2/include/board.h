@@ -473,8 +473,9 @@ extern "C"
 #endif
 
 #endif /* __ASSEMBLY__ */
-#ifdef CONFIG_SD_SECTOR_READ_REVIEW
-/* Fixed-card diagnostic pin selection; physical wiring remains unverified. */
+#if defined(CONFIG_SD_RECEIVE_LEASE_ONLY_REVIEW) && \
+    !defined(CONFIG_STM32H7_USE_LEGACY_PINMAP)
+/* SCR also initializes these SDMMC1 pins; physical wiring is unverified. */
 #  define GPIO_SDMMC1_D0 GPIO_SDMMC1_D0_0
 #  define GPIO_SDMMC1_D1 GPIO_SDMMC1_D1_0
 #  define GPIO_SDMMC1_D2 GPIO_SDMMC1_D2_0
