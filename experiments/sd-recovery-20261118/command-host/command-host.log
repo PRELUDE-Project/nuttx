@@ -1,0 +1,38 @@
+-O0 with sector
+Read summary: bytes=512 CRC32/ISO-HDLC=b2aa7578; not compared with expected data; no stop proof
+Single-sector diagnostic result 0; no data displayed; no stop proof; no retry
+PASS
+-O0 with scr
+SCR-only diagnostic result 0; no sector test or stop proof; no retry
+PASS
+-O0 with fail
+Single-sector diagnostic result -5; no data displayed; no stop proof; no retry
+PASS
+-O0 without sector
+SCR-only diagnostic result 0; no sector test or stop proof; no retry
+PASS
+-O0 without scr
+SCR-only diagnostic result 0; no sector test or stop proof; no retry
+PASS
+-O0 without fail
+SCR-only diagnostic result -5; no sector test or stop proof; no retry
+PASS
+-O2 with sector
+Read summary: bytes=512 CRC32/ISO-HDLC=b2aa7578; not compared with expected data; no stop proof
+Single-sector diagnostic result 0; no data displayed; no stop proof; no retry
+PASS
+-O2 with scr
+SCR-only diagnostic result 0; no sector test or stop proof; no retry
+PASS
+-O2 with fail
+Single-sector diagnostic result -5; no data displayed; no stop proof; no retry
+PASS
+-O2 without sector
+SCR-only diagnostic result 0; no sector test or stop proof; no retry
+PASS
+-O2 without scr
+SCR-only diagnostic result 0; no sector test or stop proof; no retry
+PASS
+-O2 without fail
+SCR-only diagnostic result -5; no sector test or stop proof; no retry
+PASS
