@@ -1,10 +1,17 @@
-# 単一セクタ読み取りのタイムアウトと次の要求
+# 単一セクタ読み取りの転送エラーと次の要求
 
-同じMMCSDインスタンスに、セクタ18と19の独立した読み取り要求を1件ずつ出しました。SDIOは模擬し、両方でカード準備とCMD17の応答を成功させたうえで、データ完了イベントだけをタイムアウト、正常完了の順に返しました。DMAと診断用の受信隔離設定は使っていません。
+同じMMCSDインスタンスに、セクタ18と19の独立した読み取り要求を1件ずつ出しました。どちらもCMD17のコマンド応答までは成功するようにし、1件目のデータ完了イベントだけを変えました。DMAと診断用の受信隔離設定は使っていません。
 
-1件目は `-ETIMEDOUT` を返してロックを解放し、2件目はセクタ19の1ブロックを返しました。ロックと解放は各2回、CMD17・受信設定・待機も各2回で、タイムアウトした要求の自動再試行や追加の `SDIO_CANCEL` 呼び出しはありませんでした。GCC 14.2.0、UBSan有効の `-O0` と `-O2` の両方で一致しました。
+| 1件目の模擬イベント | 1件目の戻り値 | 次の独立した要求 |
+| --- | --- | --- |
+| タイムアウト | `-ETIMEDOUT` | 1ブロック成功 |
+| データエラー | `-EIO` | 1ブロック成功 |
+| 転送完了とデータエラー | `-EIO` | 1ブロック成功 |
+| タイムアウトとデータエラー | `-ETIMEDOUT` | 1ブロック成功 |
 
-検証対象は上位の読み取り処理です。2件目の正常応答とバッファへの書込みは模擬SDIOが提供したため、実際のカードが次の要求に応答することや、H753のIRQ・DMA・バッファ寿命はこの試験では確認していません。
+各条件でロック・解放、CMD17、受信設定、待機は各2回でした。上位によるエラー要求の自動再試行や追加の `SDIO_CANCEL` はありません。データエラー付きの条件では、下位が先頭7バイトだけ書き込んでからエラーを通知するよう模擬しました。上位は1件目のバッファを元に戻さないため、エラー時の中身を完全な読出しデータとして扱うことはできません。2件目は別のバッファに全512バイトが揃うことを確認しました。
+
+GCC 14.2.0、UBSan有効の `-O0` と `-O2` で4条件ずつ通過しました。これはNuttX 12.10の上位処理の試験で、CRCエラーを検出する実IRQやDMA、FATの書込み経路、実カードが次の要求に応答する条件は確認していません。
 
 ## 再現手順
 
@@ -20,7 +27,7 @@ f = Path('fixture.in').read_text()
 assert f.count('__PINNED_FUNCTIONS__') == 1
 Path('fixture.c').write_text(f.replace('__PINNED_FUNCTIONS__','\n\n'.join(parts)))
 PY
-printf '%s  %s\n' fa5e29c2d5b8a0f790cc2fca280959f0c3c7e82240767120e1feaffc3c5e1339 fixture.c | sha256sum -c -
+printf '%s  %s\n' 790e37b1be320a66a7dcb4acbdae296055bbf18fa3c7d71f451d9985ba73db0c fixture.c | sha256sum -c -
 for opt in 0 2; do
   gcc -O"$opt" -std=c11 -Wall -Wextra -Werror -fsanitize=undefined \
     -fno-sanitize-recover=undefined fixture.c -o "run$opt"
@@ -67,6 +74,7 @@ struct inode { void *i_private; };
 static unsigned locks, unlocks, depth, stage, setup, waits, cmd17, cancels;
 static off_t addresses[2];
 static unsigned char *pending;
+static sdio_eventset_t first_event;
 static int mmcsd_lock(struct mmcsd_state_s *p){assert(p->dev==p&&depth==0&&stage==0);++locks;++depth;return 0;}
 static void mmcsd_unlock(struct mmcsd_state_s *p){assert(p->dev==p&&depth==1&&stage==0);--depth;++unlocks;}
 static int mmcsd_switch(struct mmcsd_state_s *p,unsigned v){(void)p;(void)v;assert(0);return -EIO;}
@@ -81,23 +89,41 @@ static int mmcsd_recv_r1(struct mmcsd_state_s *p,unsigned cmd){assert(p&&cmd==17
 static sdio_eventset_t SDIO_EVENTWAIT(void *p){
   assert(p&&depth==1&&stage==5&&pending&&waits<2);
   stage=0;
-  if (++waits==1) {pending=NULL;return SDIOWAIT_TIMEOUT;}
+  if (++waits==1) {
+    /* エラーになる前に一部を書き込んだ下位受信を模擬する。 */
+    if (first_event & SDIOWAIT_ERROR) memset(pending,0x6b,7);
+    pending=NULL;
+    return first_event;
+  }
   memset(pending,0xa5,512); pending=NULL;
   return SDIOWAIT_TRANSFERDONE;
 }
 
 __PINNED_FUNCTIONS__
 
-int main(void){
+static void run_case(sdio_eventset_t event, ssize_t expected){
+  locks=unlocks=depth=stage=setup=waits=cmd17=cancels=0;
+  first_event=event;
   struct mmcsd_state_s p={.partnum=0,.blocksize=512,.blockshift=9,.type=1};
   p.dev=&p;p.part[0].priv=&p;
   struct inode i={.i_private=&p.part[0]};
   unsigned char a[512]={0},b[512]={0};
-  assert(mmcsd_read(&i,a,18,1)==-ETIMEDOUT);
+  assert(mmcsd_read(&i,a,18,1)==expected);
+  for (size_t j=0;j<512;++j)
+    assert(a[j]==((event & SDIOWAIT_ERROR) && j<7 ? 0x6b : 0));
   assert(depth==0&&locks==1&&unlocks==1&&addresses[0]==18&&cmd17==1&&waits==1&&setup==1&&cancels==0);
   assert(mmcsd_read(&i,b,19,1)==1);
   assert(depth==0&&locks==2&&unlocks==2&&addresses[1]==19&&cmd17==2&&waits==2&&setup==2&&cancels==0);
   for (size_t j=0;j<512;++j) assert(b[j]==0xa5);
-  puts("PASS: same instance, ordinary CMD17; timeout -> -ETIMEDOUT, next request -> 1; two locks/unlocks, two CMD17, two waits, no implicit retry/CANCEL");
+  printf("PASS CMD17 first_event=%u first_result=%zd next_result=1 retry=0 cancel=0\n",
+         event, expected);
+}
+
+int main(void){
+  run_case(SDIOWAIT_TIMEOUT,-ETIMEDOUT);
+  run_case(SDIOWAIT_ERROR,-EIO);
+  run_case(SDIOWAIT_TRANSFERDONE|SDIOWAIT_ERROR,-EIO);
+  run_case(SDIOWAIT_TIMEOUT|SDIOWAIT_ERROR,-ETIMEDOUT);
+  return 0;
 }
 ```
