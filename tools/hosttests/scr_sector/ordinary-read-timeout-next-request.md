@@ -13,6 +13,12 @@
 
 GCC 14.2.0、UBSan有効の `-O0` と `-O2` で4条件ずつ通過しました。これはNuttX 12.10の上位処理の試験で、CRCエラーを検出する実IRQやDMA、FATの書込み経路、実カードが次の要求に応答する条件は確認していません。
 
+## 固定版のH7ドライバーとの対応
+
+[固定ソースの割込み処理](https://github.com/PRELUDE-Project/nuttx/blob/7965c77ad63db5ed14506ca19f112ac6df04fa7e/arch/arm/src/stm32h7/stm32_sdmmc.c#L2257-L2291)では、データのCRC不一致を検出すると `TRANSFERDONE | ERROR`、データタイムアウトでは `TRANSFERDONE | TIMEOUT` を上位へ渡します。完了ビットだけで成否を判定しない理由です。上位の `-EIO` だけでは、CRC不一致、FIFOのオーバーランなどの下位原因は区別できないため、原因を調べる際は下位のエラー記録も必要です。
+
+ここで実行したのは、通知を受ける上位処理です。割込みやカードが実際にこの通知を出したこと、CRC不一致の原因、異常後にIDMAや受信バッファを再利用できることは確認していません。
+
 ## 再現手順
 
 [固定した `mmcsd_sdio.c`](https://github.com/PRELUDE-Project/nuttx/blob/d563d3faf6629352cab248d032b422ee1e86b996/drivers/mmcsd/mmcsd_sdio.c) と下記 `fixture.in` を作業用ディレクトリに置き、次を実行します。
