@@ -1,0 +1,59 @@
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#define CONFIG_STM32_SDMMC_IDMA 1
+#define CONFIG_STM32H7_SDMMC_IDMA 1
+#define STM32_SDMMC_STA_DCRCFAIL 2u
+#define STM32_SDMMC_STA_DTIMEOUT 8u
+#define STM32_SDMMC_STA_TXUNDERR 16u
+#define STM32_SDMMC_STA_RXOVERR 32u
+#define STM32_SDMMC_STA_DATAEND 256u
+#define STM32_SDMMC_STA_DABORT 2048u
+#define STM32_SDMMC_STA_IDMATE (1u<<27)
+#define STM32_SDMMC_DCTRL_DTEN 1u
+#define STM32_SDMMC_DCTRL_OFFSET 1
+#define STM32_SDMMC_ICR_OFFSET 2
+#define STM32_SDMMC_XFRDONE_ICR 3
+#define SDIOWAIT_TRANSFERDONE 4u
+#define SDIOWAIT_TIMEOUT 8u
+#define SDIOWAIT_ERROR 16u
+#define mcerr(...) ((void)0)
+struct stm32_dev_s {
+    uint32_t remaining, receivecnt, blocksize, xfrmask;
+    bool unaligned_rx;
+    uint32_t *buffer, *sdmmc_rxbuffer;
+    unsigned notifications, event;
+};
+static unsigned invalidates, register_writes;
+static void stm32_endtransfer(struct stm32_dev_s *priv,unsigned ev){
+    ++priv->notifications; priv->event=ev;
+}
+static void up_invalidate_dcache(uintptr_t from, uintptr_t to){
+    assert(to-from==512); ++invalidates;
+}
+static uint32_t sdmmc_getreg32(struct stm32_dev_s *priv,int reg){(void)priv;(void)reg;return 0;}
+static void sdmmc_putreg32(struct stm32_dev_s *priv,uint32_t value,int reg){(void)priv;(void)value;(void)reg;++register_writes;}
+
+@RX@
+static void process(struct stm32_dev_s *priv,uint32_t status){uint32_t enabled=status,pending; (void)status;
+@IRQ@
+}
+#define IS_BASELINE @BASELINE@
+
+int main(void) {
+ static const unsigned samples[]={STM32_SDMMC_STA_DATAEND,STM32_SDMMC_STA_DCRCFAIL,STM32_SDMMC_STA_DATAEND|STM32_SDMMC_STA_DCRCFAIL};
+ for (unsigned mode=0;mode<3;++mode) for(unsigned i=0;i<3;++i){
+   uint32_t buf[128], bounce[128];memset(buf,0xa5,sizeof buf);memset(bounce,0x6b,sizeof bounce);
+   struct stm32_dev_s d={.remaining=512,.receivecnt=mode?512:0,.blocksize=512,.xfrmask=samples[2],.unaligned_rx=mode==2,.buffer=buf,.sdmmc_rxbuffer=bounce};
+   invalidates=register_writes=0;
+   process(&d,samples[i]);
+   bool ok=i==0||(i==2&&IS_BASELINE);
+   bool copied=ok&&mode==2;
+   assert(d.notifications==1&&d.event==(SDIOWAIT_TRANSFERDONE|(ok?0:SDIOWAIT_ERROR))&&register_writes==0);
+   assert(invalidates==(unsigned)((ok&&(mode==2||(mode==1&&IS_BASELINE)))?1:0));
+   for(unsigned j=0;j<128;++j)assert(buf[j]==(copied?0x6b6b6b6bu:0xa5a5a5a5u));
+   printf("mode=%u status=%u event=%u copy=%u invalidate=%u\n",mode,samples[i],d.event,copied,invalidates);
+ }
+}

@@ -133,3 +133,32 @@ int main(void){
   return 0;
 }
 ```
+
+## DATAEND と DCRCFAIL が同時に立ったとき
+
+上位の試験とは別に、STM32H7ドライバーの転送割込み分岐と `stm32_recvdma()` を固定ソースから抜き出し、同じ割込み状態をホストから与えました。各版で「完了のみ」「CRC不一致のみ」「完了とCRC不一致が同時」の3条件を、受信処理を伴わない経路、整列受信、非整列受信のそれぞれで確認しました。
+
+| 同じ割込み状態に現れたビット | 13.1.0の比較元 | エラー優先の比較版 |
+| --- | --- | --- |
+| `DATAEND` のみ | `TRANSFERDONE` | `TRANSFERDONE` |
+| `DCRCFAIL` のみ | `TRANSFERDONE \| ERROR` | `TRANSFERDONE \| ERROR` |
+| 両方 | `TRANSFERDONE` | `TRANSFERDONE \| ERROR` |
+
+同時に立つ条件で、比較元の非整列受信はバウンスバッファから512バイトをコピーしました。エラー優先版ではコピーせず、宛先は変更されませんでした。これは通知とソフトウェアによるコピーの確認です。整列受信ではIDMAが宛先へ直接書き込む場合があるため、エラー時の実メモリの無変更は保証しません。
+
+[13.1.0比較元](https://github.com/PRELUDE-Project/nuttx/blob/2b5c0de5e933281c209f954a63b99cf10c132346/arch/arm/src/stm32h7/stm32_sdmmc.c)と[エラー優先の比較版](https://github.com/PRELUDE-Project/nuttx/blob/c1fb8bedc304eec12d063a2c5fe547b84bf28430/arch/arm/src/stm32h7/stm32_sdmmc.c)のファイルを、それぞれ `baseline.c` と `error-first.c` として用意します。この文書と同じディレクトリから再現できます。
+
+```sh
+python3 -B irq-order.py /path/to/baseline.c /path/to/error-first.c /tmp/sd-irq-order
+cd /tmp/sd-irq-order
+for name in baseline error_first; do
+  for opt in 0 2; do
+    gcc -O"$opt" -std=c11 -Wall -Wextra -Werror -fsanitize=undefined \
+      -fno-sanitize-recover=undefined "$name.c" -o "$name-$opt"
+    "./$name-$opt" >"$name-$opt.log"
+  done
+  cmp "$name-0.log" "$name-2.log"
+done
+```
+
+GCC 14.2.0のUBSan有効のビルドで、版・最適化レベルあたり9条件、合計36条件が通りました。割込みの入力は模擬で、終了通知・レジスタアクセス・キャッシュ操作も代役です。実機で両ビットが同時に立つか、CRCがなぜ発生するか、IDMAが停止したか、カードが正常に読み書きできるかは未確認です。製品ドライバーは変更していません。
