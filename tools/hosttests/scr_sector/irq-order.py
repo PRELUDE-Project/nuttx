@@ -8,6 +8,7 @@ PINS = (
     "345c943a1848cd2716a31b32ce6c3691caf169ce46643859630ee5be3bbf94b5",
     "f28baba2bcbed434535afe186a1605c2c501064af5a29ba4af69335e91a381fc",
 )
+MERGED_12P10_PIN = "ed660d4467dc4012fd648ac0f80200a0470ae78e3837b245d4c4d56d6b44d01f"
 
 
 def extract(source):
@@ -19,14 +20,20 @@ def extract(source):
 
 
 def main():
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: irq-order.py BASELINE.c ERROR_FIRST.c OUT_DIR")
-    out = Path(sys.argv[3])
+    args = sys.argv[1:]
+    # 比較版を置き換える場合も、入力は統合コミットの実ファイルに限定する。
+    merged = bool(args and args[0] == "--merged-12p10")
+    if merged:
+        args = args[1:]
+    if len(args) != 3:
+        raise SystemExit("usage: irq-order.py [--merged-12p10] BASELINE.c COMPARISON.c OUT_DIR")
+    pins = (PINS[0], MERGED_12P10_PIN) if merged else PINS
+    out = Path(args[2])
     out.mkdir(parents=True, exist_ok=True)
     template = Path(__file__).with_name("irq-order.c.in").read_text()
     for index, name in enumerate(("baseline", "error_first")):
-        src = Path(sys.argv[index + 1]).read_bytes()
-        if hashlib.sha256(src).hexdigest() != PINS[index]:
+        src = Path(args[index]).read_bytes()
+        if hashlib.sha256(src).hexdigest() != pins[index]:
             raise SystemExit(f"unexpected source bytes for {name}")
         rx, irq = extract(src.decode("utf-8"))
         file = out / f"{name}.c"
